@@ -4,3 +4,4 @@ __pycache__/
 report.md
 .venv/
 outputs/
+.idea
