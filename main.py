@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from crewai import Agent, Task, Crew, LLM, Process
 from crewai_tools import SerperDevTool, ScrapeWebsiteTool
+from src.tools.storage_tool import SaveVacanciesTool
 
 # Импортируем .env
 load_dotenv()
@@ -27,6 +28,7 @@ scrape_tool = ScrapeWebsiteTool()
 AVAILABLE_TOOLS = {
     "SerperDevTool": serper_tool,
     "ScrapeWebsiteTool": scrape_tool,
+    "SaveVacanciesTool": SaveVacanciesTool()
 }
 
 # --- Модель ---

@@ -5,7 +5,8 @@
   "llm": "openai/gpt-oss-20b",
   "tools": [
     "SerperDevTool",
-    "ScrapeWebsiteTool"
+    "ScrapeWebsiteTool",
+    "SaveVacanciesTool"
   ],
   "settings": {
     "verbose": true,
