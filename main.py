@@ -1,14 +1,19 @@
 import os
-import json5
-from dotenv import load_dotenv
 from datetime import datetime
-from crewai import Agent, Task, Crew, LLM, Process
-from crewai_tools import SerperDevTool, ScrapeWebsiteTool
+
+import json5
+from crewai import LLM, Agent, Crew, Process, Task
+from crewai_tools import ScrapeWebsiteTool
+from dotenv import load_dotenv
+
+from src.tools.cached_serper_tool import CachedSerperTool
+from src.tools.check_url_tool import CheckUrlTool
+from src.tools.stats_tool import GetStatsTool
 from src.tools.storage_tool import SaveVacanciesTool
 
 # Импортируем .env
 load_dotenv()
-SERPER_API_KEY = os.getenv("SERPER_API_KEY")
+# SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 
 # Определяем константы
 BASE_DIR = os.path.dirname(__file__)
@@ -23,12 +28,14 @@ os.environ["OPENAI_API_KEY"] = "not-needed"
 
 
 # --- Инструменты ---
-serper_tool = SerperDevTool(api_key=SERPER_API_KEY)
+cached_serper_tool = CachedSerperTool()
 scrape_tool = ScrapeWebsiteTool()
 AVAILABLE_TOOLS = {
-    "SerperDevTool": serper_tool,
+    "CachedSerperTool": cached_serper_tool,
     "ScrapeWebsiteTool": scrape_tool,
-    "SaveVacanciesTool": SaveVacanciesTool()
+    "SaveVacanciesTool": SaveVacanciesTool(),
+    "GetStatsTool": GetStatsTool(),
+    "CheckUrlTool": CheckUrlTool(),
 }
 
 # --- Модель ---
@@ -124,6 +131,10 @@ def main():
 
     print("🚀 Запуск поиска вакансий и аналитики...\n")
     result = crew.kickoff()
+    print("=" * 60)
+    print("USAGE METRICS:")
+    print(crew.usage_metrics)
+    print("=" * 60)
 
     # 5. Сохраняем вывод каждой задачи вручную
     saved_files = []

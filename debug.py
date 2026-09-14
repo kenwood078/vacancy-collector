@@ -1,5 +1,5 @@
-from src.storage import VacancyStorage
 from src.analytics.stats import compute_statistics
+from src.storage import VacancyStorage
 
 with VacancyStorage() as storage:
     # vacancies = storage.get_all()

@@ -1,10 +1,10 @@
 import re
-from typing import List, Dict, Tuple, Optional
 from collections import Counter
+
 from .skills_keywords import SKILLS_KEYWORDS
 
 
-def compute_statistics(vacancies: List[Dict]) -> Dict:
+def compute_statistics(vacancies: list[dict]) -> dict:
     """
     Принимает список вакансий (словарей) и возвращает статистику.
     """
@@ -23,22 +23,21 @@ def compute_statistics(vacancies: List[Dict]) -> Dict:
     }
 
 
-def _count_cities(vacancies: List[Dict]) -> Dict:
+def _count_cities(vacancies: list[dict]) -> dict:
     city_count = Counter()
     for v in vacancies:
-        city = v.get("city")
-        if not city:
-            city = "не определено"
+        city = v.get("city") or "не определено"
         city_count[city] += 1
     return dict(city_count)
 
 
-def _get_top_skills(vacancies: List[Dict], top_n: int = 10) -> List[Tuple[str, int]]:
+def _get_top_skills(vacancies: list[dict], top_n: int = 10) -> list[tuple[str, int]]:
     """Извлекает навыки из требований и возвращает топ-N."""
     skills_sorted = sorted(SKILLS_KEYWORDS, key=len, reverse=True)
     # Строим одно регулярное выражение
     pattern = re.compile(
-        r"\b(" + "|".join(re.escape(s) for s in skills_sorted) + r")\b", re.I
+        r"(?<!\w)(" + "|".join(re.escape(s) for s in skills_sorted) + r")(?!\w)",
+        re.IGNORECASE,
     )
     skill_counter = Counter()
     for v in vacancies:
@@ -52,7 +51,7 @@ def _get_top_skills(vacancies: List[Dict], top_n: int = 10) -> List[Tuple[str, i
     return skill_counter.most_common(top_n)
 
 
-def _get_top_companies(vacancies: List[Dict], top_n: int = 5) -> List[Tuple[str, int]]:
+def _get_top_companies(vacancies: list[dict], top_n: int = 5) -> list[tuple[str, int]]:
     """Возвращает топ-N компаний по числу вакансий."""
     company_counter = Counter()
     for v in vacancies:
@@ -62,7 +61,7 @@ def _get_top_companies(vacancies: List[Dict], top_n: int = 5) -> List[Tuple[str,
     return company_counter.most_common(top_n)
 
 
-def _parse_salary(salary_str: str) -> Optional[int]:
+def _parse_salary(salary_str: str) -> int | None:
     """
     Извлекает числовое значение зарплаты из строки.
     - Одно число -> возвращает его.
@@ -86,7 +85,7 @@ def _parse_salary(salary_str: str) -> Optional[int]:
         return sum(numbers) // len(numbers)
 
 
-def _compute_salary_stats(vacancies: List[Dict]) -> Dict:
+def _compute_salary_stats(vacancies: list[dict]) -> dict:
     """Возвращает словарь с min, max, avg и количеством без зарплаты."""
     salaries = []
     no_salary_count = 0

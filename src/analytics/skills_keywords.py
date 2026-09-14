@@ -43,8 +43,8 @@ SKILLS_KEYWORDS = [
 
     # ----- Firewall и защита -----
     "Firewall", "NGFW", "UTM", "WAF", "IPS", "IDS", "DDoS", "DDoS Protection",
-    "Zscaler", "Zero Trust", "ZTNA", "SASE", "CASB", "SWG", "DLP", "SSL Inspection",
-    "NAC", "802.1X", "MFA", "SSO",
+    "Zscaler", "Zero Trust", "ZTNA", "CASB", "SWG", "DLP", "SSL Inspection",
+    "NAC", "MFA", "SSO",
 
     # ----- QoS и управление трафиком -----
     "QoS", "CoS", "Traffic Shaping", "Policing", "WRED", "LLQ", "CBWFQ", "PQ", "WFQ",
@@ -52,7 +52,7 @@ SKILLS_KEYWORDS = [
     # ----- Автоматизация и программирование -----
     "Python", "Ansible", "Terraform", "Puppet", "Chef", "Netmiko", "NAPALM",
     "REST API", "JSON", "YAML", "XML", "Git", "Jenkins", "GitLab CI", "CI/CD",
-    "SDN", "OpenFlow", "Cisco ACI", "VMware NSX", "OpenDaylight", "ONOS",
+    "SDN", "OpenFlow", "Cisco ACI", "OpenDaylight", "ONOS",
     "Bash", "PowerShell", "Perl", "Ruby", "Go",
 
     # ----- Мониторинг и управление -----
@@ -80,5 +80,5 @@ SKILLS_KEYWORDS = [
 
     # ----- Беспроводные сети -----
     "Wi-Fi", "WLAN", "802.11", "CAPWAP", "LWAPP", "Mesh", "WPA2", "WPA3",
-    "EAP", "PEAP", "LEAP", "RADIUS", "802.1X",
+    "EAP", "PEAP", "LEAP", "802.1X",
 ]

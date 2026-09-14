@@ -4,9 +4,10 @@
   "backstory": "Опытный аналитик данных с навыками работы с поисковыми системами и парсинга веб-страниц.",
   "llm": "openai/gpt-oss-20b",
   "tools": [
-    "SerperDevTool",
+    "CachedSerperTool",
     "ScrapeWebsiteTool",
-    "SaveVacanciesTool"
+    "SaveVacanciesTool",
+    "CheckUrlTool"
   ],
   "settings": {
     "verbose": true,
