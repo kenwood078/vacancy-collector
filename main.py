@@ -40,7 +40,7 @@ AVAILABLE_TOOLS = {
 
 # --- Модель ---
 first_llm = LLM(
-    model="openai/ornith-1.0-9b-mlx@8bit",
+    model="ornith-1.0-9b-mlx@8bit",
     base_url="http://localhost:1234/v1",
     api_key="not-needed",
     temperature=0.7,
@@ -129,8 +129,9 @@ def main():
         max_rpm=crew_config.get("max_rpm", None),
     )
 
+    N_VACANCIES = 2
     print("🚀 Запуск поиска вакансий и аналитики...\n")
-    result = crew.kickoff()
+    result = crew.kickoff(inputs={"n_vacancies": N_VACANCIES})
     print("=" * 60)
     print("USAGE METRICS:")
     print(crew.usage_metrics)
