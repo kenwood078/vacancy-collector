@@ -1,0 +1,72 @@
+{
+  "searchParameters": {
+    "q": "site:hh.ru/vacancy Network Engineer",
+    "type": "search",
+    "page": 1,
+    "engine": "google"
+  },
+  "organic": [
+    {
+      "title": "Network Engineer (Serbia) В архиве с 24 июня 2026",
+      "link": "https://serbia.hh.ru/vacancy/131565336",
+      "snippet": "Вакансия Network Engineer (Serbia) в компании Servers.com. Зарплата: не указана. Сербия. Требуемый опыт: 1–3 года. Занятость: полная.",
+      "position": 1
+    },
+    {
+      "title": "Вакансия Network engineer в Минске, работа в компании ... - HH.ru",
+      "link": "https://hh.ru/vacancy/136967652",
+      "snippet": "​​​​Чем предстоит заниматься. Устанавливать, настраивать и поддерживать Linux-серверы (Ubuntu, Debian); Диагностировать и устранять сетевые ...",
+      "date": "Sep 6, 2026",
+      "position": 2
+    },
+    {
+      "title": "Вакансия Network engineer in Test \\ Инженер-аналитик по ... - HH.ru",
+      "link": "https://hh.ru/vacancy/124543204",
+      "snippet": "экспертное знание и практический опыт работы с сетевыми протоколами, применяемыми в ЦОДах (MCLAG, BGP, OSPF, VxLAN и пр.) и офисах;; опыт работы с оборудованием ...",
+      "position": 3
+    },
+    {
+      "title": "Campus Network Engineer (LAN / Wi-Fi / NAC / Access Control) В ...",
+      "link": "https://hh.ru/vacancy/131962478",
+      "snippet": "Вакансия Campus Network Engineer (LAN / Wi-Fi / NAC / Access Control) в компании Цифровые привычки. Зарплата: не указана. Москва. Требуемый опыт: 3–6 лет.",
+      "position": 4
+    },
+    {
+      "title": "Сетевой инженер / Network engineer - Москва - HH.ru",
+      "link": "https://hh.ru/vacancy/135192006",
+      "snippet": "Сетевой инженер / Network engineer · Разработка программ и методик испытаний, описания процедур тестирования сетевого оборудования(маршрутизаторы, коммутаторы); ...",
+      "position": 5
+    },
+    {
+      "title": "Network Engineer В архиве с 28 июня 2026 - HH.ru",
+      "link": "https://hh.ru/vacancy/133647306",
+      "snippet": "Вакансия Network Engineer в компании HUMANOPS LTD. Зарплата: от 400000 до 500000 ₽ за месяц. Москва. Требуемый опыт: 3–6 лет. Занятость: полная.",
+      "position": 6
+    },
+    {
+      "title": "Senior Networking Engineer В архиве с 13 июня 2026",
+      "link": "https://serbia.hh.ru/vacancy/132382033",
+      "snippet": "Вакансия Senior Networking Engineer в компании MY.GAMES. Зарплата: не указана. Сербия. Требуемый опыт: 3–6 лет. Занятость: полная.",
+      "position": 7
+    },
+    {
+      "title": "Linux/Network Engineer (хостинг-платформа, OpenStack ... - HH.ru",
+      "link": "https://hh.ru/vacancy/128803008",
+      "snippet": "Linux/Network Engineer (хостинг-платформа, OpenStack/OpenNebula/Proxmox … работы: 3–6 лет Полная занятость График: 5/2 Рабочие часы: 8",
+      "position": 8
+    },
+    {
+      "title": "Senior Network Engineer В архиве с 12 февраля 2026 - hh.ru",
+      "link": "https://spb.hh.ru/vacancy/129383756",
+      "snippet": "Вакансия Senior Network Engineer в компании ATI.SU. Зарплата: не указана. Санкт-Петербург. Требуемый опыт: 3–6 лет. Занятость: полная.",
+      "position": 9
+    },
+    {
+      "title": "Network Engineer (Production Infrastructure) В архиве с 3 апреля ...",
+      "link": "https://hh.ru/vacancy/131012838",
+      "snippet": "Разработка программ и методик испытаний, описания процедур тестирования сетевого оборудования(маршрутизаторы, коммутаторы). Выполнение тестирования сетевого ...",
+      "position": 10
+    }
+  ],
+  "credits": 1
+}

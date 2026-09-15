@@ -1,15 +1,13 @@
+import argparse
+import logging
 import os
 from datetime import datetime
 
 import json5
 from crewai import LLM, Agent, Crew, Process, Task
-from crewai_tools import ScrapeWebsiteTool
 from dotenv import load_dotenv
 
-from src.tools.cached_serper_tool import CachedSerperTool
-from src.tools.check_url_tool import CheckUrlTool
 from src.tools.stats_tool import GetStatsTool
-from src.tools.storage_tool import SaveVacanciesTool
 
 # Импортируем .env
 load_dotenv()
@@ -22,29 +20,47 @@ CREW_CONFIG_PATH = os.path.join(BASE_DIR, "crew.jsonc")
 OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
 os.makedirs(OUTPUTS_DIR, exist_ok=True)
 os.environ["OPENAI_API_KEY"] = "not-needed"
-
 # print(f"BASE_DIR = {BASE_DIR}")
 # print(f"OUTPUTS_DIR = {OUTPUTS_DIR}")
 
+QUERY = """
+site:hh.ru/vacancy (intitle:"Network Engineer" OR intitle:"Сетевой инженер" OR intitle:"Network Architect" OR intitle:"Сетевой архитектор" OR intitle:"Сетевой администратор") (Москва OR "Санкт-Петербург") (удаленно OR удалённо OR remote OR дистанционно OR "удаленная работа") -архив -архиве -стажер -стажёр -junior -помощник -техподдержка -support
+"""
+
+
+def setup_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+
+
+def get_llm() -> LLM:
+    return LLM(
+        model="ornith-1.0-9b-mlx@8bit",
+        base_url="http://localhost:1234/v1",
+        api_key="not-needed",
+        temperature=0.6,
+    )
+
+
+def cmd_collect(n: int):
+    from src.collectors.pipeline import collect
+
+    llm = get_llm()
+    added, errors, attempts = collect(n_vacancies=n, query=QUERY, llm=llm)
+    print(f"\nСобрано: {added}, ошибок: {errors}, попыток: {attempts}")
+
+
+def cmd_all(n: int):
+    cmd_collect(n)
+    cmd_report()
+
 
 # --- Инструменты ---
-cached_serper_tool = CachedSerperTool()
-scrape_tool = ScrapeWebsiteTool()
 AVAILABLE_TOOLS = {
-    "CachedSerperTool": cached_serper_tool,
-    "ScrapeWebsiteTool": scrape_tool,
-    "SaveVacanciesTool": SaveVacanciesTool(),
     "GetStatsTool": GetStatsTool(),
-    "CheckUrlTool": CheckUrlTool(),
 }
-
-# --- Модель ---
-first_llm = LLM(
-    model="ornith-1.0-9b-mlx@8bit",
-    base_url="http://localhost:1234/v1",
-    api_key="not-needed",
-    temperature=0.7,
-)
 
 
 def load_agent_config(agent_name: str) -> dict:
@@ -69,7 +85,7 @@ def build_agent(agent_name: str, config: dict) -> Agent:
         role=config["role"],
         goal=config["goal"],
         backstory=config["backstory"],
-        llm=first_llm,
+        llm=get_llm(),
         tools=tools,
         verbose=settings.get("verbose", False),
         allow_delegation=settings.get("allow_delegation", False),
@@ -78,7 +94,7 @@ def build_agent(agent_name: str, config: dict) -> Agent:
     )
 
 
-def main():
+def cmd_report():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     crew_config = load_crew_config()
     agent_names = crew_config["agents"]
@@ -129,9 +145,8 @@ def main():
         max_rpm=crew_config.get("max_rpm", None),
     )
 
-    N_VACANCIES = 2
     print("🚀 Запуск поиска вакансий и аналитики...\n")
-    result = crew.kickoff(inputs={"n_vacancies": N_VACANCIES})
+    result = crew.kickoff()
     print("=" * 60)
     print("USAGE METRICS:")
     print(crew.usage_metrics)
@@ -141,10 +156,8 @@ def main():
     saved_files = []
     for i, task in enumerate(tasks):
         if task.output:
-            # Определяем имя файла в зависимости от задачи
-            if i == 0:
-                filename = f"vacancies_{timestamp}.json"
-            elif i == 1:
+            task_name = crew_config["tasks"][i]["name"]
+            if task_name == "analysis_task":
                 filename = f"report_{timestamp}.md"
             else:
                 filename = f"task_{i}_{timestamp}.txt"
@@ -170,6 +183,29 @@ def main():
     print("📄 ИТОГОВЫЙ ОТЧЁТ (финальный результат Crew):")
     print("=" * 60)
     print(result)
+
+
+def main():
+    setup_logging()
+    parser = argparse.ArgumentParser(description="Collector & Reporter")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p1 = sub.add_parser("collect")
+    p1.add_argument("--n", type=int, default=10)
+
+    sub.add_parser("report")
+
+    p2 = sub.add_parser("all")
+    p2.add_argument("--n", type=int, default=10)
+
+    args = parser.parse_args()
+
+    if args.command == "collect":
+        cmd_collect(args.n)
+    elif args.command == "report":
+        cmd_report()
+    elif args.command == "all":
+        cmd_all(args.n)
 
 
 if __name__ == "__main__":
