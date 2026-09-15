@@ -1,7 +1,22 @@
-.env
+# Python
 __pycache__/
-.DS_Store
-report.md
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual env
 .venv/
+venv/
+
+# Env
+.env
+
+# Data & outputs
+data/
 outputs/
-.idea
+tests/data/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store

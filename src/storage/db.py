@@ -1,16 +1,20 @@
-import os
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from dotenv import load_dotenv
-from datetime import datetime
 import logging
+import os
+from datetime import datetime
+
+import psycopg2
+from dotenv import load_dotenv
+from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
 load_dotenv()
 
 
 class VacancyStorage:
-    def __init__(self):
+    """Хранилище вакансий в PostgreSQL с контекстным менеджером."""
+
+    def __init__(self) -> None:
+        """Открывает соединение с БД и создаёт таблицу vacancies, если её нет."""
         self.conn = psycopg2.connect(
             host=os.getenv("DB_HOST"),
             port=os.getenv("DB_PORT"),
@@ -21,7 +25,8 @@ class VacancyStorage:
         self.conn.autocommit = False
         self._create_table()
 
-    def _create_table(self):
+    def _create_table(self) -> None:
+        """Создаёт таблицу vacancies, если её нет."""
         with self.conn.cursor() as cur:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS vacancies (
@@ -39,22 +44,22 @@ class VacancyStorage:
 
     def add_vacancy(self, vacancy: dict) -> bool:
         """
-        Добавляет одну вакансию.
-        Возвращает True, если вставка выполнена, False — если URL уже существует.
+        Добавляет одну вакансию в БД.
+
+        Args:
+            vacancy: словарь с обязательными полями url, name, company
+                     и опциональными city, salary, requirements.
+
+        Returns:
+            True, если запись добавлена; False, если URL уже существует.
+
+        Raises:
+            ValueError: если отсутствует или пустое одно из обязательных полей.
         """
-        # Проверяем обязательные поля
         required = ["url", "name", "company"]
         for field in required:
-            if field not in vacancy:
-                raise ValueError(f"Missing required field: {field}")
-
-        # Валидация данных
-        if (
-            not vacancy.get("url")
-            or not vacancy.get("name")
-            or not vacancy.get("company")
-        ):
-            raise ValueError("url, name и company не могут быть пустыми")
+            if not vacancy.get(field):
+                raise ValueError(f"Field '{field}' is required and cannot be empty")
 
         with self.conn.cursor() as cur:
             cur.execute(
@@ -62,7 +67,7 @@ class VacancyStorage:
                 INSERT INTO vacancies (url, name, company, city, salary, requirements, collected_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (url) DO NOTHING
-            """,
+                """,
                 (
                     vacancy["url"],
                     vacancy["name"],
@@ -74,27 +79,29 @@ class VacancyStorage:
                 ),
             )
             self.conn.commit()
-            return cur.rowcount > 0  # rowcount == 1 если вставлено, 0 если дубликат
+            return cur.rowcount > 0
 
     def add_vacancies(self, vacancies: list[dict]) -> tuple[int, int, int]:
         """
-        Добавляет список вакансий (каждая — словарь).
-        Возвращает кортеж (добавлено_новых, ошибок_при_добавлении, всего_попыток).
+        Добавляет список вакансий.
+
+        Returns:
+            Кортеж (добавлено, ошибок, всего).
         """
-        added = error = 0
+        added = errors = 0
         for vacancy in vacancies:
             try:
                 if self.add_vacancy(vacancy):
                     added += 1
                 else:
-                    logger.info(f"Дубликат - {vacancy.get('url')}")
+                    logger.info(f"Duplicate: {vacancy.get('url')}")
             except Exception as e:
-                logger.error(f"Ошибка при добавлении {vacancy.get('name')}, {e}")
-                error += 1
-        return added, error, len(vacancies)
+                logger.error(f"Failed to add {vacancy.get('name')}: {e}")
+                errors += 1
+        return added, errors, len(vacancies)
 
     def get_all(self, limit: int | None = None, offset: int = 0) -> list[dict]:
-        """Возвращает все вакансии (сортировка по id DESC)."""
+        """Возвращает вакансии (сортировка по id DESC) с пагинацией."""
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             query = "SELECT * FROM vacancies ORDER BY id DESC"
             if limit is not None:
@@ -107,41 +114,44 @@ class VacancyStorage:
     def get_by_url(self, url: str) -> dict | None:
         """Возвращает вакансию по URL или None."""
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            query = "SELECT * FROM vacancies WHERE url = %s"
-            cur.execute(query, (url,))
+            cur.execute("SELECT * FROM vacancies WHERE url = %s", (url,))
             return cur.fetchone()
 
     def get_by_date(self, start_date: str, end_date: str) -> list[dict]:
-        """Возвращает вакансии за диапазон дат (collected_at)."""
+        """
+        Возвращает вакансии за диапазон дат collected_at (ISO-8601).
+
+        Если end_date передана как 'YYYY-MM-DD' (10 символов), расширяется
+        до конца дня.
+        """
+        if len(end_date) == 10:
+            end_date += "T23:59:59.999999"
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            query = "SELECT * FROM vacancies WHERE collected_at BETWEEN %s AND %s"
-            if len(end_date) == 10:
-                end_date += "T23:59:59.999999"
-            cur.execute(query, (start_date, end_date))
+            cur.execute(
+                "SELECT * FROM vacancies WHERE collected_at BETWEEN %s AND %s",
+                (start_date, end_date),
+            )
             return cur.fetchall()
 
     def count(self) -> int:
         """Возвращает общее количество записей."""
         with self.conn.cursor() as cur:
-            query = "SELECT COUNT(*) FROM vacancies"
-            cur.execute(query)
+            cur.execute("SELECT COUNT(*) FROM vacancies")
             return cur.fetchone()[0]
 
     def exists(self, url: str) -> bool:
-        """Проверяет, есть ли уже вакансия с данным URL."""
+        """Проверяет, есть ли вакансия с данным URL в БД."""
         with self.conn.cursor() as cur:
-            query = "SELECT EXISTS(SELECT 1 FROM vacancies WHERE url = %s);"
-            cur.execute(query, (url,))
+            cur.execute("SELECT EXISTS(SELECT 1 FROM vacancies WHERE url = %s)", (url,))
             return cur.fetchone()[0]
 
     def close(self) -> None:
-        """Закрывает соединение с БД."""
+        """Закрывает соединение с БД, если оно открыто."""
         if self.conn and not self.conn.closed:
             self.conn.close()
 
-    # Поддержка контекстного менеджера
-    def __enter__(self):
+    def __enter__(self) -> "VacancyStorage":
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()

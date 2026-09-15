@@ -1,8 +1,8 @@
 [project]
-name = "my_project"
+name = "vacancy-collector"
 version = "0.1.0"
-description = "my_project using crewAI"
-authors = [{ name = "Your Name", email = "you@example.com" }]
+description = "Vacancy collector and analyst for hh.ru using CrewAI"
+authors = [{ name = "John", email = "john@example.com" }]
 requires-python = ">=3.10,<3.14"
 dependencies = [
     "crewai[tools]>=1.15.18,<2.0.0",
@@ -10,6 +10,7 @@ dependencies = [
     "python-dotenv",
     "requests",
     "beautifulsoup4",
+    "json5",
 ]
 
 [build-system]

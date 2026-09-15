@@ -1,7 +1,21 @@
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
 from src.collectors.serper import SerperClient
 
-client = SerperClient()
-r1 = client.search("site:hh.ru/vacancy Network Engineer", page=2)
-r2 = client.search("site:hh.ru/vacancy Network Engineer")
-print(r1)   # разные
-print(r2[0]["link"])   # ссылки
+q = "site:hh.ru/vacancy Network Engineer"
+
+c1 = SerperClient()
+print("=== with cache ===")
+r1 = c1.search(q, page=1)
+print(f"got {len(r1)}")
+
+print("=== again with cache (should hit) ===")
+r2 = c1.search(q, page=1)
+print(f"got {len(r2)}")
+
+print("=== no cache ===")
+c2 = SerperClient(use_cache=False)
+r3 = c2.search(q, page=1)
+print(f"got {len(r3)}")

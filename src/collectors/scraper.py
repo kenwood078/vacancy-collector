@@ -6,6 +6,8 @@ from bs4 import BeautifulSoup
 logger = logging.getLogger(__name__)
 
 MAX_CHARS = 15_000
+USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+TIMEOUT = 15
 
 
 def scrape(url: str) -> str:
@@ -13,8 +15,8 @@ def scrape(url: str) -> str:
     try:
         response = requests.get(
             url,
-            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
-            timeout=15,
+            headers={"User-Agent": USER_AGENT},
+            timeout=TIMEOUT,
         )
         response.raise_for_status()
     except requests.RequestException as e:
