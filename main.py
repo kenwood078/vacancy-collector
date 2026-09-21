@@ -18,10 +18,12 @@ AGENTS_DIR = os.path.join(BASE_DIR, "agents")
 CREW_CONFIG_PATH = os.path.join(BASE_DIR, "crew.jsonc")
 OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
 os.makedirs(OUTPUTS_DIR, exist_ok=True)
-os.environ["OPENAI_API_KEY"] = "not-needed"
+LLM_MODEL = os.getenv("LLM_MODEL", "openai/ornith-1.0-9b-mlx@8bit")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:1234/v1")
+LLM_API_KEY = os.getenv("LLM_API_KEY", "not-needed")
 
 QUERY = """
-site:hh.ru/vacancy (intitle:"Network Engineer" OR intitle:"Сетевой инженер" OR intitle:"Network Architect" OR intitle:"Сетевой архитектор" OR intitle:"Сетевой администратор") (Москва OR "Санкт-Петербург") (удаленно OR удалённо OR remote OR дистанционно OR "удаленная работа") -архив -архиве -стажер -стажёр -junior -помощник -техподдержка -support
+site:hh.ru/vacancy (intitle:"Network Engineer" OR intitle:"Сетевой инженер" OR intitle:"Network Architect" OR intitle:"Сетевой архитектор" OR intitle:"Сетевой администратор") (Москва OR "Санкт-Петербург") -архив -архиве -стажер -стажёр -junior -помощник -техподдержка -support
 """
 
 AVAILABLE_TOOLS = {
@@ -40,9 +42,9 @@ def setup_logging() -> None:
 def get_llm() -> LLM:
     """Создаёт экземпляр LLM, подключённый к локальному серверу."""
     return LLM(
-        model="ornith-1.0-9b-mlx@8bit",
-        base_url="http://localhost:1234/v1",
-        api_key="not-needed",
+        model=LLM_MODEL,
+        base_url=LLM_BASE_URL,
+        api_key=LLM_API_KEY,
         temperature=0.6,
     )
 
