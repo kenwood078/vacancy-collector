@@ -2,7 +2,7 @@ import logging
 
 from crewai import LLM
 
-from src.collectors.pipeline import collect
+from src.collectors.pipeline import collect_serper
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -14,5 +14,5 @@ llm = LLM(
 
 query = 'site:hh.ru/vacancy (intitle:"Network Engineer" OR intitle:"Сетевой инженер") (Москва OR "Санкт-Петербург") -архив -стажер -junior'
 
-added, errors, attempts = collect(n_vacancies=5, query=query, llm=llm)
+added, errors, attempts = collect_serper(n_vacancies=5, query=query, llm=llm)
 print(f"\nAdded: {added}, errors: {errors}, attempts: {attempts}")

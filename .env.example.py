@@ -3,7 +3,7 @@ LLM_MODEL=openai/ornith-1.0-9b-mlx@8bit
 LLM_BASE_URL=http://localhost:1234/v1
 LLM_API_KEY=not-needed
 
-# Serper API
+# Serper API (для fallback-сбора через Google)
 SERPER_API_KEY=your_serper_key
 
 # PostgreSQL
@@ -13,6 +13,14 @@ DB_NAME=vacancies
 DB_USER=postgres
 DB_PASSWORD=postgres
 
-# Cache
+# Search cache (используется только collect-serper)
 USE_CACHE=true
 CACHE_TTL_HOURS=24
+
+# CrewAI
+CREWAI_DISABLE_TELEMETRY=true
+
+# hh.ru cookies (для прямого сбора через collect-hh)
+# Как получить: DevTools → Application → Cookies → hh.ru
+HH_TOKEN=your_hhtoken_here
+HH_XSRF=your_xsrf_here

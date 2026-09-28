@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import datetime
 
 from crewai.tools import BaseTool
 
@@ -15,16 +16,16 @@ class GetStatsTool(BaseTool):
     name: str = "GetStatsTool"
     description: str = (
         "Возвращает JSON со статистикой по вакансиям из БД: total, by_city, "
-        "top_skills, salary_stats, companies. Плюс 3 примера вакансий "
+        "by_experience, by_work_format, by_employment, top_skills, "
+        "top_key_skills, salary_stats, companies. Плюс 3 примера вакансий "
         "(low/mid/high по зарплате) с полями name, company, city, salary, "
         "top_skills, url."
     )
 
     def _run(self) -> str:
-        """Читает все вакансии из БД и возвращает статистику + примеры как JSON."""
+        """Читает вакансии из БД и возвращает статистику + примеры как JSON."""
         with VacancyStorage() as storage:
             vacancies = storage.get_all()
-
         if not vacancies:
             logger.warning("No vacancies in DB")
 
@@ -32,7 +33,11 @@ class GetStatsTool(BaseTool):
         examples = self._pick_examples(vacancies)
 
         return json.dumps(
-            {"stats": stats, "examples": examples},
+            {
+                "stats": stats,
+                "examples": examples,
+                "report_date": datetime.now().astimezone().strftime("%d.%m.%Y"),
+            },
             ensure_ascii=False,
         )
 

@@ -30,16 +30,43 @@ class VacancyStorage:
         with self.conn.cursor() as cur:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS vacancies (
-                    id SERIAL PRIMARY KEY,
-                    url TEXT UNIQUE NOT NULL,
-                    name VARCHAR(100) NOT NULL,
-                    company VARCHAR(100) NOT NULL,
-                    city VARCHAR(100),
-                    salary TEXT,
-                    requirements TEXT,
-                    collected_at TEXT
-                )
+                    -- Идентификация
+                    id                SERIAL PRIMARY KEY,
+                    url               TEXT UNIQUE NOT NULL,
+                    employer_id       INTEGER,              -- ссылка на будущую таблицу companies
+                
+                    -- Основное
+                    name              TEXT NOT NULL,
+                    company           VARCHAR(200) NOT NULL,
+                    city              VARCHAR(100),
+                    salary            TEXT,
+                
+                    -- Контент
+                    requirements      TEXT,
+                    key_skills        TEXT,
+                
+                    -- Классификация
+                    experience        VARCHAR(50),
+                    work_format       TEXT,
+                    employment_form   VARCHAR(50),
+                
+                    -- Метаданные публикации
+                    published_at      TEXT,
+                    responses_count   INTEGER,
+                
+                    -- Наши метаданные
+                    collected_at      TEXT NOT NULL
+                );
             """)
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_vacancies_employer_id ON vacancies(employer_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_vacancies_collected_at ON vacancies(collected_at)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_vacancies_experience ON vacancies(experience)"
+            )
             self.conn.commit()
 
     def add_vacancy(self, vacancy: dict) -> bool:
@@ -48,7 +75,9 @@ class VacancyStorage:
 
         Args:
             vacancy: словарь с обязательными полями url, name, company
-                     и опциональными city, salary, requirements.
+                     и опциональными city, salary, requirements,
+                     experience, work_format, employment_form,
+                     published_at, employer_id, responses_count, key_skills.
 
         Returns:
             True, если запись добавлена; False, если URL уже существует.
@@ -64,8 +93,18 @@ class VacancyStorage:
         with self.conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO vacancies (url, name, company, city, salary, requirements, collected_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO vacancies (
+                    url, name, company, city, salary, requirements,
+                    experience, work_format, employment_form,
+                    published_at, employer_id, responses_count, key_skills,
+                    collected_at
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s
+                )
                 ON CONFLICT (url) DO NOTHING
                 """,
                 (
@@ -75,6 +114,13 @@ class VacancyStorage:
                     vacancy.get("city"),
                     vacancy.get("salary"),
                     vacancy.get("requirements"),
+                    vacancy.get("experience"),
+                    vacancy.get("work_format"),
+                    vacancy.get("employment_form"),
+                    vacancy.get("published_at"),
+                    vacancy.get("employer_id"),
+                    vacancy.get("responses_count"),
+                    vacancy.get("key_skills"),
                     datetime.now().isoformat(),
                 ),
             )
@@ -109,6 +155,33 @@ class VacancyStorage:
                 cur.execute(query, (limit, offset))
             else:
                 cur.execute(query)
+            return cur.fetchall()
+
+    def get_by_name(self, patterns: list[str], limit: int | None = None) -> list[dict]:
+        """
+        Возвращает вакансии, у которых в name встречается любой из patterns
+        (регистронезависимо, ILIKE).
+
+        Args:
+            patterns: список подстрок, например ["Сет", "Net"].
+            limit: максимум записей.
+
+        Returns:
+            Список словарей.
+        """
+        if not patterns:
+            return []
+
+        conditions = " OR ".join(["name ILIKE %s"] * len(patterns))
+        params = [f"%{p}%" for p in patterns]
+
+        query = f"SELECT * FROM vacancies WHERE {conditions} ORDER BY id DESC"
+        if limit is not None:
+            query += " LIMIT %s"
+            params.append(limit)
+
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query, params)
             return cur.fetchall()
 
     def get_by_url(self, url: str) -> dict | None:

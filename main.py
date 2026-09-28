@@ -22,9 +22,11 @@ LLM_MODEL = os.getenv("LLM_MODEL", "openai/ornith-1.0-9b-mlx@8bit")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:1234/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "not-needed")
 
-QUERY = """
+QUERY_SERPER = """
 site:hh.ru/vacancy (intitle:"Network Engineer" OR intitle:"Сетевой инженер" OR intitle:"Network Architect" OR intitle:"Сетевой архитектор" OR intitle:"Сетевой администратор") (Москва OR "Санкт-Петербург") -архив -архиве -стажер -стажёр -junior -помощник -техподдержка -support
 """
+
+QUERY_HH = '("Сетевой инженер" OR "Network Engineer" OR "Сетевой архитектор" OR "Network Architect" OR "Сетевой администратор" OR "NetOps" OR "Инженер по сетевой безопасности" OR "Инженер сетевой безопасности")'
 
 AVAILABLE_TOOLS = {
     "GetStatsTool": GetStatsTool(),
@@ -81,17 +83,33 @@ def build_agent(config: dict) -> Agent:
     )
 
 
-def cmd_collect(n: int, no_cache: bool = False) -> None:
+def cmd_collect_serper(n: int, no_cache: bool = False) -> None:
     """Собирает n новых вакансий без использования агентов."""
-    from src.collectors.pipeline import collect
+    from src.collectors.pipeline import collect_serper
 
-    added, errors, attempts = collect(
-        n_vacancies=n,
-        query=QUERY,
-        llm=get_llm(),
-        use_cache=not no_cache,
+    added, errors, attempts = collect_serper(
+        n_vacancies=n, query=QUERY_SERPER, llm=get_llm(), use_cache=not no_cache
     )
     print(f"\nСобрано: {added}, ошибок: {errors}, попыток: {attempts}")
+
+
+def cmd_collect_hh(n: int) -> None:
+    """Сбор n вакансий напрямую с hh.ru."""
+    from src.collectors.pipeline import collect_hh
+
+    added, errors, attempts = collect_hh(
+        n_vacancies=n,
+        query=QUERY_HH,
+        area=[1, 2],
+        search_period=30,
+        search_field=["name"],
+        experience=["between1And3", "between3And6", "moreThan6"],
+        work_format=["REMOTE", "HYBRID"],
+        excluded_text="стажер junior помощник техподдержка support",
+        only_with_salary=False,
+        professional_role=112,
+    )
+    print(f"\n[hh] Собрано: {added}, ошибок: {errors}, попыток: {attempts}")
 
 
 def cmd_report() -> None:
@@ -171,9 +189,15 @@ def cmd_report() -> None:
     print(result)
 
 
-def cmd_all(n: int, no_cache: bool = False) -> None:
-    """Сбор вакансий + генерация отчёта."""
-    cmd_collect(n, no_cache=no_cache)
+def cmd_all_serper(n: int, no_cache: bool = False) -> None:
+    """Сбор вакансий serper + генерация отчёта."""
+    cmd_collect_serper(n, no_cache=no_cache)
+    cmd_report()
+
+
+def cmd_all_hh(n: int) -> None:
+    """Сбор вакансий hh + генерация отчёта."""
+    cmd_collect_hh(n)
     cmd_report()
 
 
@@ -182,26 +206,34 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Collector & Reporter")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_collect = sub.add_parser("collect", help="Собрать вакансии в БД")
-    p_collect.add_argument("--n", type=int, default=10, help="Сколько новых вакансий")
-    p_collect.add_argument(
-        "--no-cache", action="store_true", help="Игнорировать кэш поиска"
-    )
+    p_hh = sub.add_parser("collect-hh", help="Сбор напрямую с hh.ru")
+    p_hh.add_argument("--n", type=int, default=10)
+
+    p_serper = sub.add_parser("collect-serper", help="Сбор через Serper")
+    p_serper.add_argument("--n", type=int, default=10)
+    p_serper.add_argument("--no-cache", action="store_true")
 
     sub.add_parser("report", help="Сгенерировать отчёт по данным из БД")
 
-    p_all = sub.add_parser("all", help="Сбор + отчёт")
-    p_all.add_argument("--n", type=int, default=10)
-    p_all.add_argument("--no-cache", action="store_true")
+    p_all_hh = sub.add_parser("all-hh", help="Сбор + отчет")
+    p_all_hh.add_argument("--n", type=int, default=10)
+
+    p_all_serper = sub.add_parser("all-serper", help="Сбор + отчет")
+    p_all_serper.add_argument("--n", type=int, default=10)
+    p_all_serper.add_argument("--no-cache", action="store_true")
 
     args = parser.parse_args()
 
-    if args.command == "collect":
-        cmd_collect(args.n, no_cache=args.no_cache)
+    if args.command == "collect-serper":
+        cmd_collect_serper(args.n, no_cache=args.no_cache)
+    elif args.command == "collect-hh":
+        cmd_collect_hh(args.n)
     elif args.command == "report":
         cmd_report()
-    elif args.command == "all":
-        cmd_all(args.n, no_cache=args.no_cache)
+    elif args.command == "all-serper":
+        cmd_all_serper(args.n, no_cache=args.no_cache)
+    elif args.command == "all-hh":
+        cmd_all_hh(args.n)
 
 
 if __name__ == "__main__":
