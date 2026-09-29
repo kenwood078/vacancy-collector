@@ -31,31 +31,43 @@ class VacancyStorage:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS vacancies (
                     -- Идентификация
-                    id                SERIAL PRIMARY KEY,
-                    url               TEXT UNIQUE NOT NULL,
-                    employer_id       INTEGER,              -- ссылка на будущую таблицу companies
-                
+                    id                      SERIAL PRIMARY KEY,
+                    url                     TEXT UNIQUE NOT NULL,
+
                     -- Основное
-                    name              TEXT NOT NULL,
-                    company           VARCHAR(200) NOT NULL,
-                    city              VARCHAR(100),
-                    salary            TEXT,
-                
+                    name                    TEXT NOT NULL,
+                    city                    VARCHAR(100),
+
+                    -- Работодатель
+                    employer                VARCHAR(200) NOT NULL,
+                    employer_id             INTEGER,
+                    employer_rating         NUMERIC(3,1),
+                    employer_reviews_count  INTEGER,
+
+                    -- Зарплата
+                    salary                  TEXT,
+                    salary_from             INTEGER,
+                    salary_to               INTEGER,
+                    salary_currency         VARCHAR(10),
+                    salary_gross            BOOLEAN,
+
                     -- Контент
-                    requirements      TEXT,
-                    key_skills        TEXT,
-                
+                    requirements            TEXT,
+                    key_skills              TEXT,
+
                     -- Классификация
-                    experience        VARCHAR(50),
-                    work_format       TEXT,
-                    employment_form   VARCHAR(50),
-                
+                    experience              VARCHAR(50),
+                    work_format             TEXT,
+                    employment_form         VARCHAR(50),
+                    schedule                VARCHAR(50),
+                    professional_role       INTEGER,
+
                     -- Метаданные публикации
-                    published_at      TEXT,
-                    responses_count   INTEGER,
-                
+                    published_at            TEXT,
+                    responses_count         INTEGER,
+
                     -- Наши метаданные
-                    collected_at      TEXT NOT NULL
+                    collected_at            TEXT NOT NULL
                 );
             """)
             cur.execute(
@@ -67,6 +79,9 @@ class VacancyStorage:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_vacancies_experience ON vacancies(experience)"
             )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_vacancies_professional_role ON vacancies(professional_role)"
+            )
             self.conn.commit()
 
     def add_vacancy(self, vacancy: dict) -> bool:
@@ -74,10 +89,8 @@ class VacancyStorage:
         Добавляет одну вакансию в БД.
 
         Args:
-            vacancy: словарь с обязательными полями url, name, company
-                     и опциональными city, salary, requirements,
-                     experience, work_format, employment_form,
-                     published_at, employer_id, responses_count, key_skills.
+            vacancy: словарь с обязательными полями url, name, employer
+                     и опциональными city, salary и т.д.
 
         Returns:
             True, если запись добавлена; False, если URL уже существует.
@@ -85,7 +98,7 @@ class VacancyStorage:
         Raises:
             ValueError: если отсутствует или пустое одно из обязательных полей.
         """
-        required = ["url", "name", "company"]
+        required = ["url", "name", "employer"]
         for field in required:
             if not vacancy.get(field):
                 raise ValueError(f"Field '{field}' is required and cannot be empty")
@@ -94,15 +107,21 @@ class VacancyStorage:
             cur.execute(
                 """
                 INSERT INTO vacancies (
-                    url, name, company, city, salary, requirements,
-                    experience, work_format, employment_form,
-                    published_at, employer_id, responses_count, key_skills,
+                    url, name, city,
+                    employer, employer_id, employer_rating, employer_reviews_count,
+                    salary, salary_from, salary_to, salary_currency, salary_gross,
+                    requirements, key_skills,
+                    experience, work_format, employment_form, schedule, professional_role,
+                    published_at, responses_count,
                     collected_at
                 )
                 VALUES (
-                    %s, %s, %s, %s, %s, %s,
                     %s, %s, %s,
                     %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s,
                     %s
                 )
                 ON CONFLICT (url) DO NOTHING
@@ -110,17 +129,25 @@ class VacancyStorage:
                 (
                     vacancy["url"],
                     vacancy["name"],
-                    vacancy["company"],
                     vacancy.get("city"),
+                    vacancy["employer"],
+                    vacancy.get("employer_id"),
+                    vacancy.get("employer_rating"),
+                    vacancy.get("employer_reviews_count"),
                     vacancy.get("salary"),
+                    vacancy.get("salary_from"),
+                    vacancy.get("salary_to"),
+                    vacancy.get("salary_currency"),
+                    vacancy.get("salary_gross"),
                     vacancy.get("requirements"),
+                    vacancy.get("key_skills"),
                     vacancy.get("experience"),
                     vacancy.get("work_format"),
                     vacancy.get("employment_form"),
+                    vacancy.get("schedule"),
+                    vacancy.get("professional_role"),
                     vacancy.get("published_at"),
-                    vacancy.get("employer_id"),
                     vacancy.get("responses_count"),
-                    vacancy.get("key_skills"),
                     datetime.now().isoformat(),
                 ),
             )

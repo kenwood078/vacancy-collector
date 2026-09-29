@@ -179,12 +179,13 @@ class HHClient:
             return None
 
         desc_html = _find_key(vv, "description") or ""
-        key_skills_obj = _find_key(vv, "keySkills") or {}
-        skills = (
-            key_skills_obj.get("keySkill", [])
-            if isinstance(key_skills_obj, dict)
-            else []
-        )
+        key_skills_raw = _find_key(vv, "keySkills") or []
+        if isinstance(key_skills_raw, list):
+            skills = [s for s in key_skills_raw if isinstance(s, str)]
+        elif isinstance(key_skills_raw, dict):
+            skills = key_skills_raw.get("keySkill", [])
+        else:
+            skills = []
 
         desc_text = BeautifulSoup(desc_html, "html.parser").get_text(
             separator="\n", strip=True
@@ -241,28 +242,61 @@ class HHClient:
         return salary + mode_suffix + gross_suffix
 
     def fetch_full(self, vacancy: dict) -> dict | None:
+        """
+        Принимает vacancy из search и возвращает готовый dict для БД.
+        Внутри подтягивает detail. Возвращает None, если detail нет.
+        """
         detail = self._get_detail(vacancy["vacancyId"])
         if not detail:
             return None
 
-        wf = vacancy.get("workFormats", [])
+        wf = vacancy.get("workFormats") or []
         work_format = None
         if wf and isinstance(wf, list):
             elements = wf[0].get("workFormatsElement", [])
             work_format = ",".join(elements) if elements else None
 
+        comp = vacancy.get("compensation") or {}
+        has_comp = "noCompensation" not in comp and comp
+        salary_from = comp.get("from") if has_comp else None
+        salary_to = comp.get("to") if has_comp else None
+        salary_currency = comp.get("currencyCode") if has_comp else None
+        salary_gross = comp.get("gross") if has_comp else None
+
+        role_obj = vacancy.get("professionalRoleIds") or []
+        professional_role = None
+        if role_obj and isinstance(role_obj, list):
+            ids = role_obj[0].get("professionalRoleId", [])
+            if ids:
+                professional_role = ids[0]
+
+        company = vacancy.get("company") or {}
+        reviews = company.get("employerReviews") or {}
+        employer_rating = reviews.get("totalRating")
+        employer_reviews_count = reviews.get("reviewsCount")
+
+        skills = detail.get("key_skills") or []
+
         return {
             "url": f"{HH_BASE}/vacancy/{vacancy['vacancyId']}",
             "name": vacancy.get("name"),
-            "company": vacancy.get("company", {}).get("name"),
             "city": vacancy.get("area", {}).get("name"),
-            "salary": self._parse_salary(vacancy.get("compensation", {})),
+            "employer": company.get("name"),
+            "employer_id": company.get("id"),
+            "employer_rating": employer_rating,
+            "employer_reviews_count": employer_reviews_count,
+            "salary": self._parse_salary(comp),
+            "salary_from": salary_from,
+            "salary_to": salary_to,
+            "salary_currency": salary_currency,
+            "salary_gross": salary_gross,
             "requirements": detail.get("requirements_text"),
+            "key_skills": ",".join(skills) if skills else None,
             "experience": vacancy.get("workExperience"),
             "work_format": work_format,
             "employment_form": vacancy.get("employmentForm"),
+            "schedule": vacancy.get("@workSchedule"),
+            "professional_role": professional_role,
             "published_at": vacancy.get("publicationTime", {}).get("$"),
-            "employer_id": vacancy.get("company", {}).get("id"),
             "responses_count": vacancy.get("totalResponsesCount"),
-            "key_skills": ",".join(detail.get("key_skills", [])) or None,
         }

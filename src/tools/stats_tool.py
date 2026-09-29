@@ -17,8 +17,8 @@ class GetStatsTool(BaseTool):
     description: str = (
         "Возвращает JSON со статистикой по вакансиям из БД: total, by_city, "
         "by_experience, by_work_format, by_employment, top_skills, "
-        "top_key_skills, salary_stats, companies. Плюс 3 примера вакансий "
-        "(low/mid/high по зарплате) с полями name, company, city, salary, "
+        "top_key_skills, salary_stats, employers. Плюс 3 примера вакансий "
+        "(low/mid/high по зарплате) с полями name, employer, city, salary, "
         "top_skills, url."
     )
 
@@ -46,7 +46,7 @@ class GetStatsTool(BaseTool):
         Выбирает 3 показательных примера: с минимальной, медианной и
         максимальной зарплатой. Если зарплат нет — первые 3 вакансии.
 
-        В каждом примере: name, company, city, salary, top_skills (до 5), url.
+        В каждом примере: name, employer, city, salary, top_skills (до 5), url.
         """
         if not vacancies:
             return []
@@ -81,7 +81,7 @@ class GetStatsTool(BaseTool):
             result.append(
                 {
                     "name": v.get("name"),
-                    "company": v.get("company"),
+                    "employer": v.get("employer"),
                     "city": v.get("city"),
                     "salary": v.get("salary"),
                     "top_skills": [s for s, _ in skills],

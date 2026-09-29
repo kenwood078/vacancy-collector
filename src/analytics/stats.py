@@ -23,7 +23,7 @@ def compute_statistics(vacancies: list[dict]) -> dict:
             - top_skills: топ-10 навыков из поля requirements (regex);
             - top_key_skills: топ-10 навыков из key_skills (готовые теги hh.ru);
             - salary_stats: min/max/avg и количество без зарплаты;
-            - companies: топ-10 компаний.
+            - employers: топ-10 работодателей.
     """
     return {
         "total": len(vacancies),
@@ -34,7 +34,7 @@ def compute_statistics(vacancies: list[dict]) -> dict:
         "top_skills": get_top_skills(vacancies, top_n=10),
         "top_key_skills": get_top_key_skills(vacancies, top_n=10),
         "salary_stats": _compute_salary_stats(vacancies),
-        "companies": _get_top_companies(vacancies, top_n=10),
+        "employers": _get_top_employers(vacancies, top_n=10),
     }
 
 
@@ -126,14 +126,14 @@ def get_top_key_skills(vacancies: list[dict], top_n: int = 10) -> list[tuple[str
     return counter.most_common(top_n)
 
 
-def _get_top_companies(vacancies: list[dict], top_n: int = 10) -> list[tuple[str, int]]:
-    """Возвращает топ-N компаний по числу вакансий."""
-    company_counter = Counter()
+def _get_top_employers(vacancies: list[dict], top_n: int = 10) -> list[tuple[str, int]]:
+    """Возвращает топ-N работодателей по числу вакансий."""
+    employer_counter = Counter()
     for v in vacancies:
-        company = v.get("company")
-        if company:
-            company_counter[company] += 1
-    return company_counter.most_common(top_n)
+        employer = v.get("employer")
+        if employer:
+            employer_counter[employer] += 1
+    return employer_counter.most_common(top_n)
 
 
 def parse_salary(salary_str: str) -> int | None:

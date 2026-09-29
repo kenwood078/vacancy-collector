@@ -84,8 +84,8 @@ def collect_hh(
                     continue
 
                 # Проверка обязательных полей
-                if not data.get("company") or not data.get("name"):
-                    logger.info(f"Skip (empty name/company): {v['vacancyId']}")
+                if not data.get("employer") or not data.get("name"):
+                    logger.info(f"Skip (empty name/employer): {v['vacancyId']}")
                     continue
 
                 if storage.add_vacancy(data):
@@ -154,10 +154,14 @@ def collect_serper(
                 if not data:
                     continue
 
+                # Маппинг company → employer
+                if "company" in data:
+                    data["employer"] = data.pop("company")
+
                 if storage.add_vacancy(data):
                     added += 1
                     logger.info(
-                        f"[{added}/{n_vacancies}] {data['name']} @ {data['company']}"
+                        f"[{added}/{n_vacancies}] {data['name']} @ {data['employer']}"
                     )
                 else:
                     errors += 1
