@@ -3,29 +3,73 @@
 from datetime import datetime
 
 
-def _fmt_list(items, empty: str = "—") -> str:
-    """Склеивает список через запятую; пустое → '—'."""
+def _fmt_list(items: list[str] | None, empty: str = "—") -> str:
+    """Склеивает список через запятую; пустое → '—'.
+
+    Args:
+        items: список строк или None.
+        empty: текст для пустого списка.
+
+    Returns:
+        Строка с элементами через запятую или значение empty.
+    """
     if not items:
         return empty
     return ", ".join(items)
 
 
 def _stack_overlap(resume_stack: list[str], vacancy_stack: list[str]) -> list[str]:
-    """
-    Возвращает пересечение двух стеков (case-insensitive),
+    """Возвращает пересечение двух стеков (case-insensitive),
     сохраняя оригинальное написание из резюме.
 
-    Example:
+    Args:
+        resume_stack: стек резюме или None.
+        vacancy_stack: стек вакансии или None.
+
+    Returns:
+        Уникальные совпадения в порядке и написании резюме.
+
+    Examples:
         resume = ["Cisco", "BGP", "Python"]
         vacancy = ["cisco", "ospf", "python"]
         → ["Cisco", "Python"]
     """
-    if not resume_stack or not vacancy_stack:
+    return _overlap(resume_stack, vacancy_stack)
+
+
+def _domain_overlap(
+    resume_domains: list[str] | None, vacancy_domains: list[str] | None
+) -> list[str]:
+    """Возвращает пересечение доменов без учёта регистра.
+
+    Args:
+        resume_domains: домены резюме или None.
+        vacancy_domains: домены вакансии или None.
+
+    Returns:
+        Уникальные совпадения в порядке и написании резюме.
+    """
+    return _overlap(resume_domains, vacancy_domains)
+
+
+def _overlap(
+    resume_items: list[str] | None, vacancy_items: list[str] | None
+) -> list[str]:
+    """Сохраняет порядок и написание резюме, исключая повторные совпадения.
+
+    Args:
+        resume_items: элементы резюме или None.
+        vacancy_items: элементы вакансии или None.
+
+    Returns:
+        Уникальные совпадения в порядке и написании резюме.
+    """
+    if not resume_items or not vacancy_items:
         return []
-    vacancy_lower = {s.lower() for s in vacancy_stack}
+    vacancy_lower = {s.lower() for s in vacancy_items}
     seen = set()
     result = []
-    for s in resume_stack:
+    for s in resume_items:
         key = s.lower()
         if key in vacancy_lower and key not in seen:
             result.append(s)
@@ -33,23 +77,15 @@ def _stack_overlap(resume_stack: list[str], vacancy_stack: list[str]) -> list[st
     return result
 
 
-def _domain_overlap(resume_domains, vacancy_domains) -> list[str]:
-    """Пересечение доменов (case-insensitive)."""
-    if not resume_domains or not vacancy_domains:
-        return []
-    vacancy_lower = {d.lower() for d in vacancy_domains}
-    seen = set()
-    result = []
-    for d in resume_domains:
-        key = d.lower()
-        if key in vacancy_lower and key not in seen:
-            result.append(d)
-            seen.add(key)
-    return result
-
-
 def _build_resume_header(resume: dict) -> list[str]:
-    """Шапка с параметрами резюме."""
+    """Шапка с параметрами резюме.
+
+    Args:
+        resume: словарь с полями резюме.
+
+    Returns:
+        Строки раздела резюме в Markdown.
+    """
     role = resume.get("role") or "—"
     experience = resume.get("experience_years")
     experience_str = f"{experience} лет" if experience is not None else "—"
@@ -77,7 +113,14 @@ def _build_resume_header(resume: dict) -> list[str]:
 
 
 def _build_matches_table(matches: list[dict]) -> list[str]:
-    """Таблица top-N вакансий."""
+    """Таблица top-N вакансий.
+
+    Args:
+        matches: вакансии с оценками совпадения в порядке поиска.
+
+    Returns:
+        Строки Markdown-таблицы, включая заголовок.
+    """
     lines = [
         "| # | Score | Название | Работодатель | Город | Формат | Опыт | Зарплата | Ссылка |",
         "|---|-------|----------|--------------|-------|--------|------|----------|--------|",
@@ -102,7 +145,16 @@ def _build_matches_table(matches: list[dict]) -> list[str]:
 def _build_top3_breakdown(
     resume: dict, matches: list[dict], top_n: int = 3
 ) -> list[str]:
-    """Разбор топ-3 вакансий: пересечение стека и доменов."""
+    """Разбор топ-3 вакансий: пересечение стека и доменов.
+
+    Args:
+        resume: словарь с полями резюме.
+        matches: вакансии с оценками совпадения в порядке поиска.
+        top_n: максимальное число результатов.
+
+    Returns:
+        Строки разбора первых top_n вакансий.
+    """
     resume_stack = resume.get("stack") or []
     resume_domains = resume.get("domains") or []
 
@@ -150,7 +202,14 @@ def _build_top3_breakdown(
 
 
 def _build_summary(matches: list[dict]) -> list[str]:
-    """Сводка: средний score, разброс."""
+    """Сводка: средний score, разброс.
+
+    Args:
+        matches: вакансии с оценками совпадения в порядке поиска.
+
+    Returns:
+        Строки сводки оценок или сообщения о пустом результате.
+    """
     if not matches:
         return ["## Сводка", "", "Нет вакансий для анализа."]
 
@@ -171,8 +230,7 @@ def _build_summary(matches: list[dict]) -> list[str]:
 
 
 def build_match_report(resume: dict, matches: list[dict]) -> str:
-    """
-    Собирает Markdown-отчёт по матчингу резюме.
+    """Собирает Markdown-отчёт по матчингу резюме.
 
     Args:
         resume: строка из таблицы resumes.
@@ -182,7 +240,8 @@ def build_match_report(resume: dict, matches: list[dict]) -> str:
         Markdown-текст отчёта.
     """
     resume_id = resume.get("id", "?")
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    # Сохраняем локальное время и прежний формат даты.
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")  # noqa: DTZ005
 
     lines: list[str] = [
         f"# Подбор вакансий под резюме #{resume_id}",

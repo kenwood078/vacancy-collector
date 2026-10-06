@@ -11,16 +11,22 @@ salary, ready_to_relocate) живут в БД и работают как SQL-ф�
 EMPTY = "не указано"
 
 
-def _join(items) -> str:
-    """Склеивает список строк через запятую; пустое → 'не указано'."""
+def _join(items: list[str] | None) -> str:
+    """Склеивает список строк через запятую; пустое → 'не указано'.
+
+    Args:
+        items: список строк или None.
+
+    Returns:
+        Строка с элементами через запятую или «не указано».
+    """
     if not items:
         return EMPTY
     return ", ".join(items)
 
 
 def _build_lines(name: str, row: dict) -> list[str]:
-    """
-    Общее тело embedding_text. Порядок полей фиксирован.
+    """Общее тело embedding_text. Порядок полей фиксирован.
 
     Args:
         name: значение первой строки — name вакансии или role резюме.
@@ -42,8 +48,7 @@ def _build_lines(name: str, row: dict) -> list[str]:
 
 
 def build_vacancy_text(row: dict) -> str:
-    """
-    embedding_text для вакансии.
+    """embedding_text для вакансии.
 
     Args:
         row: объединённая строка vacancy_analysis + vacancies
@@ -57,8 +62,7 @@ def build_vacancy_text(row: dict) -> str:
 
 
 def build_resume_text(row: dict) -> str:
-    """
-    embedding_text для резюме.
+    """embedding_text для резюме.
 
     Args:
         row: строка из таблицы resumes или dict с теми же ключами.

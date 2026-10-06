@@ -7,8 +7,7 @@ UNKNOWN_CITY = "не определено"
 
 
 def compute_statistics(vacancies: list[dict]) -> dict:
-    """
-    Считает агрегированную статистику по списку вакансий.
+    """Считает агрегированную статистику по списку вакансий.
 
     Args:
         vacancies: список словарей из БД.
@@ -39,7 +38,14 @@ def compute_statistics(vacancies: list[dict]) -> dict:
 
 
 def _count_cities(vacancies: list[dict]) -> dict[str, int]:
-    """Возвращает распределение вакансий по городам; пустой город → 'не определено'."""
+    """Возвращает распределение вакансий по городам; пустой город → 'не определено'.
+
+    Args:
+        vacancies: список словарей вакансий.
+
+    Returns:
+        Количество вакансий по городам.
+    """
     city_count = Counter()
     for v in vacancies:
         city = v.get("city") or UNKNOWN_CITY
@@ -50,10 +56,17 @@ def _count_cities(vacancies: list[dict]) -> dict[str, int]:
 def _count_by_field(
     vacancies: list[dict], field: str, unknown: str = "не указано"
 ) -> dict[str, int]:
-    """
-    Считает распределение вакансий по значению поля.
+    """Считает распределение вакансий по значению поля.
 
     None и пустые строки попадают в бакет `unknown`.
+
+    Args:
+        vacancies: список словарей вакансий.
+        field: имя поля для подсчёта.
+        unknown: значение для пустых полей.
+
+    Returns:
+        Количество вакансий по значениям поля.
     """
     counter = Counter()
     for v in vacancies:
@@ -63,11 +76,16 @@ def _count_by_field(
 
 
 def _count_work_formats(vacancies: list[dict]) -> dict[str, int]:
-    """
-    Считает распределение по форматам работы.
+    """Считает распределение по форматам работы.
 
     work_format хранится строкой через запятую ("REMOTE,HYBRID"),
     поэтому одна вакансия может попасть в несколько бакетов.
+
+    Args:
+        vacancies: список словарей вакансий.
+
+    Returns:
+        Количество вакансий по каждому указанному формату.
     """
     counter = Counter()
     for v in vacancies:
@@ -83,10 +101,16 @@ def _count_work_formats(vacancies: list[dict]) -> dict[str, int]:
 
 
 def get_top_skills(vacancies: list[dict], top_n: int = 10) -> list[tuple[str, int]]:
-    """
-    Извлекает навыки из поля requirements и возвращает топ-N.
+    """Извлекает навыки из поля requirements и возвращает топ-N.
 
     Каждый навык учитывается не более одного раза на вакансию.
+
+    Args:
+        vacancies: список словарей вакансий.
+        top_n: максимальное число результатов.
+
+    Returns:
+        Пары (навык, количество вакансий) в порядке частоты.
     """
     # Длинные навыки первыми, чтобы "VMware NSX" матчился раньше "VMware"
     skills_sorted = sorted(SKILLS_KEYWORDS, key=len, reverse=True)
@@ -107,14 +131,17 @@ def get_top_skills(vacancies: list[dict], top_n: int = 10) -> list[tuple[str, in
 
 
 def get_top_key_skills(vacancies: list[dict], top_n: int = 10) -> list[tuple[str, int]]:
-    """
-    Извлекает ключевые навыки из поля key_skills и возвращает топ-N.
+    """Извлекает ключевые навыки из поля key_skills и возвращает топ-N.
 
     Поле key_skills в БД хранится как строка с навыками через запятую.
     Регистр приводится к нижнему, пробелы обрезаются.
 
     Returns:
         Список кортежей [(навык, количество), ...] длиной до top_n.
+
+    Args:
+        vacancies: список словарей вакансий.
+        top_n: максимальное число результатов.
     """
     counter = Counter()
     for v in vacancies:
@@ -127,7 +154,15 @@ def get_top_key_skills(vacancies: list[dict], top_n: int = 10) -> list[tuple[str
 
 
 def _get_top_employers(vacancies: list[dict], top_n: int = 10) -> list[tuple[str, int]]:
-    """Возвращает топ-N работодателей по числу вакансий."""
+    """Возвращает топ-N работодателей по числу вакансий.
+
+    Args:
+        vacancies: список словарей вакансий.
+        top_n: максимальное число результатов.
+
+    Returns:
+        Пары (работодатель, количество вакансий) в порядке частоты.
+    """
     employer_counter = Counter()
     for v in vacancies:
         employer = v.get("employer")
@@ -137,14 +172,19 @@ def _get_top_employers(vacancies: list[dict], top_n: int = 10) -> list[tuple[str
 
 
 def parse_salary(salary_str: str) -> int | None:
-    """
-    Извлекает числовое значение зарплаты из строки.
+    """Извлекает числовое значение зарплаты из строки.
 
     - Одно число → возвращает его.
     - Два и более чисел → возвращает среднее (целочисленное).
     - Если чисел нет → None.
 
     Учитывает разделители тысяч (пробелы, запятые, точки).
+
+    Args:
+        salary_str: зарплата в текстовом виде.
+
+    Returns:
+        Среднее найденных чисел с целочисленным делением или None.
     """
     if not salary_str:
         return None
@@ -158,11 +198,13 @@ def parse_salary(salary_str: str) -> int | None:
 
 
 def _compute_salary_stats(vacancies: list[dict]) -> dict:
-    """
-    Возвращает статистику по зарплатам.
+    """Возвращает статистику по зарплатам.
 
     Returns:
-        Словарь с ключами min, max, avg (int или None) и no_salary_count.
+        Словарь с ключами min/max (int или None), avg (float или None) и no_salary_count.
+
+    Args:
+        vacancies: список словарей вакансий.
     """
     salaries: list[int] = []
     no_salary_count = 0

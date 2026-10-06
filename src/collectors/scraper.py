@@ -11,7 +11,14 @@ TIMEOUT = 15
 
 
 def scrape(url: str) -> str:
-    """Возвращает очищенный текст страницы или пустую строку при ошибке."""
+    """Возвращает очищенный текст страницы или пустую строку при ошибке.
+
+    Args:
+        url: URL страницы вакансии.
+
+    Returns:
+        Текст страницы до MAX_CHARS символов или пустая строка при ошибке запроса.
+    """
     try:
         response = requests.get(
             url,
@@ -20,7 +27,7 @@ def scrape(url: str) -> str:
         )
         response.raise_for_status()
     except requests.RequestException as e:
-        logger.warning(f"Scrape failed {url}: {e}")
+        logger.warning("Scrape failed %s: %s", url, e)
         return ""
 
     soup = BeautifulSoup(response.text, "html.parser")
@@ -29,5 +36,5 @@ def scrape(url: str) -> str:
     if len(text) > MAX_CHARS:
         text = text[:MAX_CHARS]
 
-    logger.info(f"Scraped {url}: {len(text)} chars")
+    logger.info("Scraped %s: %s chars", url, len(text))
     return text

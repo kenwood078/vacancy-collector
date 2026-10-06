@@ -7,9 +7,8 @@ from src.storage import VacancyStorage
 logger = logging.getLogger(__name__)
 
 
-def _parse_vector(value) -> list[float]:
-    """
-    Приводит вектор из БД к списку float.
+def _parse_vector(value: str | list[float]) -> list[float]:
+    """Приводит вектор из БД к списку float.
 
     psycopg2 без регистрации pgvector-адаптера возвращает vector как строку
     вида "[-0.0004,0.0216,...]". Если значение уже список — возвращаем как есть.
@@ -19,6 +18,9 @@ def _parse_vector(value) -> list[float]:
 
     Returns:
         Список float.
+
+    Raises:
+        ValueError: если тип значения не поддерживается или числа некорректны.
     """
     if isinstance(value, list):
         return [float(x) for x in value]
@@ -28,8 +30,7 @@ def _parse_vector(value) -> list[float]:
 
 
 def match_resume(resume_id: int, top_n: int = 20) -> tuple[dict, list[dict]]:
-    """
-    Достаёт резюме из БД и находит top-N ближайших вакансий.
+    """Достаёт резюме из БД и находит top-N ближайших вакансий.
 
     Args:
         resume_id: ID резюме в таблице resumes.

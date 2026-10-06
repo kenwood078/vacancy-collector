@@ -26,7 +26,8 @@ class QwenEmbedder:
         model: str | None = None,
         api_key: str | None = None,
     ) -> None:
-        """
+        """Инициализирует клиент с указанными настройками.
+
         Args:
             base_url: URL сервера. None — из .env.
             model: имя модели. None — из .env.
@@ -38,6 +39,20 @@ class QwenEmbedder:
         self.api_key = api_key or API_KEY
 
     def _post(self, text: str) -> list[float]:
+        """Отправляет текст на сервер эмбеддингов.
+
+        Args:
+            text: исходный текст.
+
+        Returns:
+            Вектор из первого элемента data ответа сервера.
+
+        Raises:
+            requests.RequestException: если запрос или HTTP-статус завершился ошибкой.
+            ValueError: если ответ не является корректным JSON.
+            KeyError: если в ответе нет ожидаемых полей.
+            IndexError: если список data пуст.
+        """
         r = requests.post(
             self.url,
             headers={
@@ -51,10 +66,24 @@ class QwenEmbedder:
         return r.json()["data"][0]["embedding"]
 
     def embed_document(self, text: str) -> list[float]:
-        """Эмбеддинг документа (вакансии). Без префикса."""
+        """Эмбеддинг документа (вакансии). Без префикса.
+
+        Args:
+            text: исходный текст.
+
+        Returns:
+            Вектор вакансии без инструкции в запросе.
+        """
         return self._post(text)
 
     def embed_query(self, text: str) -> list[float]:
-        """Эмбеддинг запроса (резюме). С инструкцией Qwen3."""
+        """Эмбеддинг запроса (резюме). С инструкцией Qwen3.
+
+        Args:
+            text: исходный текст.
+
+        Returns:
+            Вектор резюме с инструкцией Qwen3 в запросе.
+        """
         wrapped = f"Instruct: {QUERY_INSTRUCTION}\nQuery: {text}"
         return self._post(wrapped)

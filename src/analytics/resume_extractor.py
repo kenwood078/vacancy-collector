@@ -1,6 +1,12 @@
 import json
 import logging
 import re
+from typing import TYPE_CHECKING, Any
+
+from ._extraction_utils import _clean_item, _clean_json_response, _clean_list
+
+if TYPE_CHECKING:
+    from crewai import LLM
 
 logger = logging.getLogger(__name__)
 
@@ -115,12 +121,27 @@ PROMPT_TEMPLATE = """Ты — парсер резюме. Извлекаешь д
 class ResumeExtractor:
     """Извлекает структурированные данные из резюме через LLM."""
 
-    def __init__(self, llm) -> None:
+    def __init__(self, llm: "LLM") -> None:
+        """Сохраняет LLM и имя модели для извлечения полей.
+
+        Args:
+            llm: экземпляр CrewAI LLM с методом call(prompt).
+        """
         self.llm = llm
         self.llm_model = getattr(llm, "model", "unknown")
 
     def extract(self, text: str) -> dict | None:
-        """Принимает текст резюме, возвращает dict или None."""
+        """Извлекает и нормализует поля резюме через LLM.
+
+        Args:
+            text: исходный текст резюме.
+
+        Returns:
+            Словарь с ролью, городом, форматом работы, стажем, зарплатными
+            ожиданиями и их границами, готовностью к переезду, списками навыков,
+            задач, сертификатов, доменов и языков, уровнем английского,
+            llm_model и prompt_version. None для короткого текста или ошибки ответа.
+        """
         if len(text) < 100:
             logger.info("Skip (too short): %d chars", len(text))
             return None
@@ -129,11 +150,9 @@ class ResumeExtractor:
 
         try:
             raw = self.llm.call(prompt)
-            cleaned = re.sub(
-                r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE
-            ).strip()
+            cleaned = _clean_json_response(raw)
             result = json.loads(cleaned)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 -- сохранить обработку всех ошибок операции
             logger.warning("Resume extract failed: %s", e)
             return None
 
@@ -147,22 +166,39 @@ class ResumeExtractor:
 
     @staticmethod
     def _clean(item: str) -> str:
-        item = re.sub(r"\s*\(.*?\)", "", item)
-        item = item.strip().strip("-—•*").strip()
-        item = item.strip("\"'«»").strip()
-        item = re.sub(r"\s+", " ", item)
-        return item.strip()
+        """Очищает строку ответа LLM.
+
+        Args:
+            item: строка для очистки.
+
+        Returns:
+            Очищенная строка.
+        """
+        return _clean_item(item)
 
     @staticmethod
-    def _to_list(value, max_n: int) -> list[str]:
-        if not isinstance(value, list):
-            return []
-        cleaned = [ResumeExtractor._clean(str(s)) for s in value if str(s).strip()]
-        return [s for s in cleaned if s][:max_n]
+    def _to_list(value: Any, max_n: int) -> list[str]:
+        """Преобразует значение JSON в ограниченный список строк.
+
+        Args:
+            value: значение для преобразования.
+            max_n: максимальное число элементов результата.
+
+        Returns:
+            Очищенные непустые строки в исходном порядке.
+        """
+        return _clean_list(value, max_n, ResumeExtractor._clean)
 
     @staticmethod
-    def _to_year(value) -> int | None:
-        """Приводит значение к целому году. Мусор → None."""
+    def _to_year(value: Any) -> int | None:
+        """Приводит значение к целому году. Мусор → None.
+
+        Args:
+            value: значение для преобразования.
+
+        Returns:
+            Целое число лет или None для неподходящего значения.
+        """
         if value is None:
             return None
         if isinstance(value, bool):
@@ -173,10 +209,15 @@ class ResumeExtractor:
 
     @staticmethod
     def _parse_salary(text: str | None) -> tuple[int | None, int | None]:
-        """
-        Парсит зарплату из строки.
+        """Парсит зарплату из строки.
 
-        Example:
+        Args:
+            text: исходный текст.
+
+        Returns:
+            Границы зарплаты; неизвестная граница представлена None.
+
+        Examples:
             'от 220 000 ₽' → (220000, None)
             '200 000 - 300 000 ₽' → (200000, 300000)
             '3000 $' → (3000, 3000)
@@ -204,6 +245,14 @@ class ResumeExtractor:
 
     @staticmethod
     def _validate(result: dict) -> dict | None:
+        """Нормализует структурированные поля ответа LLM.
+
+        Args:
+            result: разобранный ответ LLM.
+
+        Returns:
+            Нормализованный словарь или None, если ответ не является словарём.
+        """
         if not isinstance(result, dict):
             return None
 

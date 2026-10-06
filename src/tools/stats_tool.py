@@ -23,7 +23,11 @@ class GetStatsTool(BaseTool):
     )
 
     def _run(self) -> str:
-        """Читает вакансии из БД и возвращает статистику + примеры как JSON."""
+        """Читает вакансии из БД и возвращает статистику + примеры как JSON.
+
+        Returns:
+            JSON с ключами stats, examples и report_date.
+        """
         with VacancyStorage() as storage:
             vacancies = storage.get_all()
         if not vacancies:
@@ -42,31 +46,35 @@ class GetStatsTool(BaseTool):
         )
 
     def _pick_examples(self, vacancies: list[dict]) -> list[dict]:
-        """
-        Выбирает 3 показательных примера: с минимальной, медианной и
+        """Выбирает 3 показательных примера: с минимальной, медианной и
         максимальной зарплатой. Если зарплат нет — первые 3 вакансии.
 
         В каждом примере: name, employer, city, salary, top_skills (до 5), url.
+
+        Args:
+            vacancies: список словарей вакансий.
+
+        Returns:
+            До трёх примеров с уникальными URL, включая навыки каждой вакансии.
         """
         if not vacancies:
             return []
 
-        with_salary = [
-            v
-            for v in vacancies
-            if v.get("salary") and parse_salary(v["salary"]) is not None
-        ]
+        with_salary: list[tuple[dict, int]] = []
+        for vacancy in vacancies:
+            if vacancy.get("salary"):
+                salary = parse_salary(vacancy["salary"])
+                if salary is not None:
+                    with_salary.append((vacancy, salary))
 
         if not with_salary:
             picked = vacancies[:3]
         else:
-            sorted_by_salary = sorted(
-                with_salary, key=lambda v: parse_salary(v["salary"])
-            )
+            sorted_by_salary = sorted(with_salary, key=lambda item: item[1])
             picked = [
-                sorted_by_salary[0],
-                sorted_by_salary[len(sorted_by_salary) // 2],
-                sorted_by_salary[-1],
+                sorted_by_salary[0][0],
+                sorted_by_salary[len(sorted_by_salary) // 2][0],
+                sorted_by_salary[-1][0],
             ]
 
         seen_urls: set[str] = set()

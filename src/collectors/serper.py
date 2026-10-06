@@ -21,7 +21,8 @@ class SerperClient:
         api_key: str | None = None,
         use_cache: bool | None = None,
     ) -> None:
-        """
+        """Инициализирует клиент с указанными настройками.
+
         Args:
             api_key: ключ Serper. Если None — берётся из env SERPER_API_KEY.
             use_cache: использовать ли кэш. Если None — берётся из env USE_CACHE.
@@ -37,8 +38,7 @@ class SerperClient:
         self.cache = SearchCache()
 
     def search(self, query: str, page: int = 1) -> list[dict]:
-        """
-        Ищет через Serper. Возвращает список organic-результатов.
+        """Ищет через Serper. Возвращает список organic-результатов.
 
         Args:
             query: поисковый запрос.
@@ -52,10 +52,10 @@ class SerperClient:
         if self.use_cache:
             cached = self.cache.get(key)
             if cached:
-                logger.info(f"Cache hit: {query[:50]} page={page}")
+                logger.info("Cache hit: %s page=%s", query[:50], page)
                 return cached.get("organic", [])
 
-        logger.info(f"Cache miss → Serper: {query[:50]} page={page}")
+        logger.info("Cache miss → Serper: %s page=%s", query[:50], page)
         try:
             response = requests.post(
                 SERPER_URL,
@@ -69,7 +69,7 @@ class SerperClient:
             response.raise_for_status()
             data = response.json()
         except requests.RequestException as e:
-            logger.warning(f"Serper request failed (page={page}): {e}")
+            logger.warning("Serper request failed (page=%s): %s", page, e)
             return []
 
         if self.use_cache:
@@ -78,7 +78,15 @@ class SerperClient:
         return data.get("organic", [])
 
     def search_pages(self, query: str, pages: int = 3) -> list[dict]:
-        """Возвращает organic-результаты с первых `pages` страниц."""
+        """Возвращает organic-результаты с первых `pages` страниц.
+
+        Args:
+            query: поисковая строка.
+            pages: число страниц выдачи.
+
+        Returns:
+            Результаты organic в порядке страниц.
+        """
         results = []
         for page in range(1, pages + 1):
             results.extend(self.search(query, page=page))

@@ -1,11 +1,24 @@
 import json
 import logging
-import re
+from typing import TYPE_CHECKING
+
+from src.analytics._extraction_utils import (
+    MARKDOWN_FENCE as _MARKDOWN_FENCE,
+)
+from src.analytics._extraction_utils import (
+    _clean_json_response,
+)
+
+if TYPE_CHECKING:
+    from crewai import LLM
 
 logger = logging.getLogger(__name__)
 
+MARKDOWN_FENCE = _MARKDOWN_FENCE
+
+MARKDOWN_FENCE = _MARKDOWN_FENCE
+
 ARCHIVE_MARKERS = ["вакансия в архиве", "в архиве с"]
-MARKDOWN_FENCE = re.compile(r"^```(?:json)?|```$", re.MULTILINE)
 
 PROMPT_TEMPLATE = """Извлеки данные из текста вакансии. Верни ТОЛЬКО валидный JSON без markdown:
 {{
@@ -21,9 +34,8 @@ PROMPT_TEMPLATE = """Извлеки данные из текста ваканс�
 """
 
 
-def extract_vacancy(text: str, url: str, llm) -> dict | None:
-    """
-    Извлекает поля вакансии из текста через один изолированный вызов LLM.
+def extract_vacancy(text: str, url: str, llm: "LLM") -> dict | None:
+    """Извлекает поля вакансии из текста через один изолированный вызов LLM.
 
     Args:
         text: очищенный текст страницы вакансии.
@@ -35,21 +47,21 @@ def extract_vacancy(text: str, url: str, llm) -> dict | None:
         или None, если вакансия архивная, ответ невалиден, либо LLM упала.
     """
     if any(marker in text.lower() for marker in ARCHIVE_MARKERS):
-        logger.info(f"Archive skip: {url}")
+        logger.info("Archive skip: %s", url)
         return None
 
     try:
         raw = llm.call(PROMPT_TEMPLATE.format(text=text))
-        cleaned = MARKDOWN_FENCE.sub("", raw.strip()).strip()
+        cleaned = _clean_json_response(raw)
         result = json.loads(cleaned)
 
         if not result or not result.get("name") or not result.get("company"):
-            logger.warning(f"Missing required fields: {url}")
+            logger.warning("Missing required fields: %s", url)
             return None
 
         result["url"] = url
-        logger.info(f"Extracted: {result['name']} @ {result['company']}")
+        logger.info("Extracted: %s @ %s", result["name"], result["company"])
         return result
-    except Exception as e:
-        logger.warning(f"Extract failed {url}: {e}")
+    except Exception as e:  # noqa: BLE001 -- сохранить обработку всех ошибок операции
+        logger.warning("Extract failed %s: %s", url, e)
         return None

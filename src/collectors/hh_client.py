@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import time
+from typing import Any
 
 import requests
 from bs4 import BeautifulSoup
@@ -32,8 +33,16 @@ CURRENCY_SYMBOLS = {
 _NOT_FOUND = object()
 
 
-def _find_key(obj, key: str):
-    """Рекурсивно ищет ключ в dict/list."""
+def _find_key(obj: Any, key: str) -> Any:
+    """Рекурсивно ищет ключ в dict/list.
+
+    Args:
+        obj: вложенные словари, списки или другое значение.
+        key: искомый ключ.
+
+    Returns:
+        Первое найденное значение, включая None; _NOT_FOUND, если ключ отсутствует.
+    """
     if isinstance(obj, dict):
         if key in obj:
             return obj[key]  # вернёт даже None
@@ -50,7 +59,9 @@ def _find_key(obj, key: str):
 
 
 class HHClient:
-    def __init__(self):
+    """Клиент поиска и страниц вакансий hh.ru через cookie-сессию."""
+
+    def __init__(self) -> None:
         """Создаёт requests.Session с cookies из .env."""
         self.session = requests.Session()
         self.session.cookies.set("hhtoken", HH_TOKEN, domain=".hh.ru")
@@ -65,7 +76,17 @@ class HHClient:
 
     @staticmethod
     def _extract_state(html: str) -> dict:
-        """Парсит template#HH-Lux-InitialState → dict."""
+        """Парсит template#HH-Lux-InitialState → dict.
+
+        Args:
+            html: HTML страницы hh.ru.
+
+        Returns:
+            Объект JSON из template#HH-Lux-InitialState.
+
+        Raises:
+            ValueError: если template отсутствует или содержит некорректный JSON.
+        """
         soup = BeautifulSoup(html, "html.parser")
         tpl = soup.find("template", id="HH-Lux-InitialState")
         if tpl is None:
@@ -89,8 +110,7 @@ class HHClient:
         professional_role: int | None = None,
         order_by: str = "publication_time",
     ) -> list[dict]:
-        """
-        Возвращает список вакансий (сырые dict из hh.ru).
+        """Возвращает список вакансий (сырые dict из hh.ru).
 
         Args:
             query: поисковая строка (поддерживает операторы NAME:, OR, NOT, "...").
@@ -145,24 +165,29 @@ class HHClient:
 
         try:
             r = self.session.get(HH_SEARCH, params=params, timeout=TIMEOUT)
-            # print(f"[DEBUG] URL: {r.url}")
             r.raise_for_status()
             data = self._extract_state(r.text)
             result = data.get("vacancySearchResult", {})
             logger.info(
-                f"totalResults={result.get('totalResults')}, "
-                f"on page={len(result.get('vacancies', []))}"
+                "totalResults=%s, on page=%s",
+                result.get("totalResults"),
+                len(result.get("vacancies", [])),
             )
         except requests.exceptions.RequestException as e:
-            logger.error(f"HH search failed: {e}")
+            logger.error("HH search failed: %s", e)
             return []
 
         return data.get("vacancySearchResult", {}).get("vacancies", [])
 
     def _get_detail(self, vacancy_id: int) -> dict | None:
-        """
-        Парсит страницу вакансии и возвращает dict с полями:
+        """Парсит страницу вакансии и возвращает dict с полями:
         description, key_skills, requirements_text.
+
+        Args:
+            vacancy_id: ID вакансии.
+
+        Returns:
+            Описание, список навыков и текст требований либо None при отсутствии данных.
         """
         time.sleep(1.5)
         try:
@@ -170,12 +195,12 @@ class HHClient:
             r.raise_for_status()
             data = self._extract_state(r.text)
         except (requests.RequestException, ValueError) as e:
-            logger.warning(f"HH detail failed for {vacancy_id}: {e}")
+            logger.warning("HH detail failed for %s: %s", vacancy_id, e)
             return None
 
         vv = data.get("vacancyView")
         if not vv:
-            logger.warning(f"No vacancyView for {vacancy_id}")
+            logger.warning("No vacancyView for %s", vacancy_id)
             return None
 
         desc_html = _find_key(vv, "description") or ""
@@ -203,10 +228,15 @@ class HHClient:
 
     @staticmethod
     def _parse_salary(compensation: dict) -> str | None:
-        """
-        Преобразует compensation из hh.ru в читаемую строку.
+        """Преобразует compensation из hh.ru в читаемую строку.
 
-        Example:
+        Args:
+            compensation: объект compensation из ответа hh.ru.
+
+        Returns:
+            Строка зарплаты с валютой, периодом и налоговым статусом либо None.
+
+        Examples:
             {"from": 250000, "currencyCode": "RUR", "gross": False, "mode": "MONTH"}
             → "от 250000 ₽ в месяц (на руки)"
         """
@@ -241,20 +271,58 @@ class HHClient:
 
         return salary + mode_suffix + gross_suffix
 
-    def fetch_full(self, vacancy: dict) -> dict | None:
-        """
-        Принимает vacancy из search и возвращает готовый dict для БД.
-        Внутри подтягивает detail. Возвращает None, если detail нет.
-        """
-        detail = self._get_detail(vacancy["vacancyId"])
-        if not detail:
-            return None
+    @staticmethod
+    def _parse_work_format(vacancy: dict) -> str | None:
+        """Извлекает форматы из первого элемента workFormats.
 
+        Args:
+            vacancy: словарь с полями вакансии.
+
+        Returns:
+            Форматы через запятую либо None.
+        """
         wf = vacancy.get("workFormats") or []
         work_format = None
         if wf and isinstance(wf, list):
             elements = wf[0].get("workFormatsElement", [])
             work_format = ",".join(elements) if elements else None
+
+        return work_format
+
+    @staticmethod
+    def _parse_professional_role(vacancy: dict) -> int | None:
+        """Извлекает первый ID роли из первого элемента professionalRoleIds.
+
+        Args:
+            vacancy: словарь с полями вакансии.
+
+        Returns:
+            Первый ID роли либо None.
+        """
+        role_obj = vacancy.get("professionalRoleIds") or []
+        professional_role = None
+        if role_obj and isinstance(role_obj, list):
+            ids = role_obj[0].get("professionalRoleId", [])
+            if ids:
+                professional_role = ids[0]
+
+        return professional_role
+
+    def fetch_full(self, vacancy: dict) -> dict | None:
+        """Принимает vacancy из search и возвращает готовый dict для БД.
+        Внутри подтягивает detail. Возвращает None, если detail нет.
+
+        Args:
+            vacancy: словарь с полями вакансии.
+
+        Returns:
+            Поля вакансии для БД либо None, если detail недоступен.
+        """
+        detail = self._get_detail(vacancy["vacancyId"])
+        if not detail:
+            return None
+
+        work_format = self._parse_work_format(vacancy)
 
         comp = vacancy.get("compensation") or {}
         has_comp = "noCompensation" not in comp and comp
@@ -263,12 +331,7 @@ class HHClient:
         salary_currency = comp.get("currencyCode") if has_comp else None
         salary_gross = comp.get("gross") if has_comp else None
 
-        role_obj = vacancy.get("professionalRoleIds") or []
-        professional_role = None
-        if role_obj and isinstance(role_obj, list):
-            ids = role_obj[0].get("professionalRoleId", [])
-            if ids:
-                professional_role = ids[0]
+        professional_role = self._parse_professional_role(vacancy)
 
         company = vacancy.get("company") or {}
         reviews = company.get("employerReviews") or {}

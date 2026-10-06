@@ -1,10 +1,14 @@
 import logging
+from typing import TYPE_CHECKING
 
 from src.collectors.extractor import extract_vacancy
 from src.collectors.hh_client import HHClient
 from src.collectors.scraper import scrape
 from src.collectors.serper import SerperClient
 from src.storage import VacancyStorage
+
+if TYPE_CHECKING:
+    from crewai import LLM
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +28,7 @@ def collect_hh(
     professional_role: int | None = None,
     max_pages: int = 50,
 ) -> tuple[int, int, int]:
-    """
-    Собирает до n_vacancies новых вакансий напрямую с hh.ru.
+    """Собирает до n_vacancies новых вакансий напрямую с hh.ru.
 
     Args:
         n_vacancies: сколько новых вакансий нужно.
@@ -67,10 +70,10 @@ def collect_hh(
                 professional_role=professional_role,
             )
             if not results:
-                logger.info(f"Page {page} empty, stopping")
+                logger.info("Page %s empty, stopping", page)
                 break
 
-            logger.info(f"Page {page}: {len(results)} results")
+            logger.info("Page %s: %s results", page, len(results))
 
             for v in results:
                 attempts += 1
@@ -80,17 +83,17 @@ def collect_hh(
 
                 data = client.fetch_full(v)
                 if not data:
-                    logger.info(f"Skip (no detail): {v['vacancyId']}")
+                    logger.info("Skip (no detail): %s", v["vacancyId"])
                     continue
 
                 # Проверка обязательных полей
                 if not data.get("employer") or not data.get("name"):
-                    logger.info(f"Skip (empty name/employer): {v['vacancyId']}")
+                    logger.info("Skip (empty name/employer): %s", v["vacancyId"])
                     continue
 
                 if storage.add_vacancy(data):
                     added += 1
-                    logger.info(f"[{added}/{n_vacancies}] {data['name']}")
+                    logger.info("[%s/%s] %s", added, n_vacancies, data["name"])
                 else:
                     errors += 1
 
@@ -102,7 +105,11 @@ def collect_hh(
             page += 1
 
     logger.info(
-        f"Done: added={added}, errors={errors}, attempts={attempts}, pages={page}"
+        "Done: added=%s, errors=%s, attempts=%s, pages=%s",
+        added,
+        errors,
+        attempts,
+        page,
     )
     return added, errors, attempts
 
@@ -110,11 +117,10 @@ def collect_hh(
 def collect_serper(
     n_vacancies: int,
     query: str,
-    llm,
+    llm: "LLM",
     use_cache: bool | None = None,
 ) -> tuple[int, int, int]:
-    """
-    Собирает до n_vacancies новых вакансий: Serper → scrape → extract → БД.
+    """Собирает до n_vacancies новых вакансий: Serper → scrape → extract → БД.
 
     Пропускает уже существующие URL и архивные вакансии.
 
@@ -142,7 +148,7 @@ def collect_serper(
                 attempts += 1
 
                 if storage.exists(url):
-                    logger.info(f"Skip (exists): {url}")
+                    logger.info("Skip (exists): %s", url)
                     continue
 
                 text = scrape(url)
@@ -161,7 +167,11 @@ def collect_serper(
                 if storage.add_vacancy(data):
                     added += 1
                     logger.info(
-                        f"[{added}/{n_vacancies}] {data['name']} @ {data['employer']}"
+                        "[%s/%s] %s @ %s",
+                        added,
+                        n_vacancies,
+                        data["name"],
+                        data["employer"],
                     )
                 else:
                     errors += 1
@@ -172,5 +182,5 @@ def collect_serper(
             if stop:
                 break
 
-    logger.info(f"Done: added={added}, errors={errors}, attempts={attempts}")
+    logger.info("Done: added=%s, errors=%s, attempts=%s", added, errors, attempts)
     return added, errors, attempts

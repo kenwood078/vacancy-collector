@@ -1,6 +1,11 @@
 import json
 import logging
-import re
+from typing import TYPE_CHECKING, Any
+
+from ._extraction_utils import _clean_item, _clean_json_response, _clean_list
+
+if TYPE_CHECKING:
+    from crewai import LLM
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +109,9 @@ A1, A2, B1, B2, C1, C2, native, unknown.
 class VacancyExtractor:
     """Извлекает структурированные данные из вакансии через LLM."""
 
-    def __init__(self, llm) -> None:
-        """
+    def __init__(self, llm: "LLM") -> None:
+        """Инициализирует клиент с указанными настройками.
+
         Args:
             llm: экземпляр CrewAI LLM с методом .call(prompt).
         """
@@ -113,8 +119,7 @@ class VacancyExtractor:
         self.llm_model = getattr(llm, "model", "unknown")
 
     def extract(self, vacancy: dict) -> dict | None:
-        """
-        Принимает vacancy из БД, возвращает структурированный dict или None.
+        """Принимает vacancy из БД, возвращает структурированный dict или None.
 
         Args:
             vacancy: словарь из таблицы vacancies.
@@ -134,11 +139,9 @@ class VacancyExtractor:
 
         try:
             raw = self.llm.call(prompt)
-            cleaned = re.sub(
-                r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE
-            ).strip()
+            cleaned = _clean_json_response(raw)
             result = json.loads(cleaned)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 -- сохранить обработку всех ошибок операции
             logger.warning("Extract failed for %s: %s", vacancy.get("id"), e)
             return None
 
@@ -153,30 +156,43 @@ class VacancyExtractor:
 
     @staticmethod
     def _clean(item: str) -> str:
-        """
-        Убирает скобки, кавычки, ведущие дефисы; схлопывает пробелы.
+        """Убирает скобки, кавычки, ведущие дефисы; схлопывает пробелы.
 
-        Example:
+        Args:
+            item: строка для очистки.
+
+        Returns:
+            Очищенная строка.
+
+        Examples:
             'Cisco (Catalyst, Nexus)' → 'Cisco'
             '- "Python"' → 'Python'
         """
-        item = re.sub(r"\s*\(.*?\)", "", item)
-        item = item.strip().strip("-—•*").strip()
-        item = item.strip("\"'«»").strip()
-        item = re.sub(r"\s+", " ", item)
-        return item.strip()
+        return _clean_item(item)
 
     @staticmethod
-    def _to_list(value, max_n: int) -> list[str]:
-        """Приводит значение к списку очищенных строк с ограничением длины."""
-        if not isinstance(value, list):
-            return []
-        cleaned = [VacancyExtractor._clean(str(s)) for s in value if str(s).strip()]
-        return [s for s in cleaned if s][:max_n]
+    def _to_list(value: Any, max_n: int) -> list[str]:
+        """Приводит значение к списку очищенных строк с ограничением длины.
+
+        Args:
+            value: значение для преобразования.
+            max_n: максимальное число элементов результата.
+
+        Returns:
+            Очищенные непустые строки в исходном порядке.
+        """
+        return _clean_list(value, max_n, VacancyExtractor._clean)
 
     @staticmethod
     def _validate(result: dict) -> dict | None:
-        """Проверяет структуру ответа LLM и приводит к стандарту."""
+        """Проверяет структуру ответа LLM и приводит к стандарту.
+
+        Args:
+            result: разобранный ответ LLM.
+
+        Returns:
+            Нормализованный словарь или None, если ответ не является словарём.
+        """
         if not isinstance(result, dict):
             logger.warning("LLM returned non-dict: %r", type(result))
             return None

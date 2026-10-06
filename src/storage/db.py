@@ -1,6 +1,8 @@
 import logging
 import os
 from datetime import datetime
+from types import TracebackType
+from typing import Any
 
 import psycopg2
 from dotenv import load_dotenv
@@ -14,7 +16,7 @@ class VacancyStorage:
     """Хранилище вакансий в PostgreSQL с контекстным менеджером."""
 
     def __init__(self) -> None:
-        """Открывает соединение с БД и создаёт таблицу vacancies, если её нет."""
+        """Открывает соединение с БД и создаёт таблицы, если их нет."""
         self.conn = psycopg2.connect(
             host=os.getenv("DB_HOST"),
             port=os.getenv("DB_PORT"),
@@ -140,8 +142,7 @@ class VacancyStorage:
             self.conn.commit()
 
     def add_vacancy(self, vacancy: dict) -> bool:
-        """
-        Добавляет одну вакансию в БД.
+        """Добавляет одну вакансию в БД.
 
         Args:
             vacancy: словарь с обязательными полями url, name, employer
@@ -203,15 +204,15 @@ class VacancyStorage:
                     vacancy.get("professional_role"),
                     vacancy.get("published_at"),
                     vacancy.get("responses_count"),
-                    datetime.now().isoformat(),
+                    # Сохраняем локальное время и прежний формат даты.
+                    datetime.now().isoformat(),  # noqa: DTZ005
                 ),
             )
             self.conn.commit()
             return cur.rowcount > 0
 
     def save_analysis(self, analysis: dict) -> bool:
-        """
-        Upsert анализа вакансии в vacancy_analysis.
+        """Upsert анализа вакансии в vacancy_analysis.
 
         Args:
             analysis: словарь от VacancyExtractor.extract() с полями
@@ -253,21 +254,25 @@ class VacancyStorage:
                     analysis["english_level"],
                     analysis["llm_model"],
                     analysis["prompt_version"],
-                    datetime.now().isoformat(),
+                    # Сохраняем локальное время и прежний формат даты.
+                    datetime.now().isoformat(),  # noqa: DTZ005
                 ),
             )
             self.conn.commit()
             return cur.rowcount > 0
 
     def get_analyzed_ids(self) -> set[int]:
-        """Возвращает set vacancy_id, для которых уже есть анализ."""
+        """Возвращает set vacancy_id, для которых уже есть анализ.
+
+        Returns:
+            Множество ID вакансий с анализом.
+        """
         with self.conn.cursor() as cur:
             cur.execute("SELECT vacancy_id FROM vacancy_analysis")
             return {row[0] for row in cur.fetchall()}
 
     def get_unanalyzed(self, limit: int | None = None) -> list[dict]:
-        """
-        Возвращает вакансии, для которых ещё нет записи в vacancy_analysis.
+        """Возвращает вакансии, для которых ещё нет записи в vacancy_analysis.
 
         Args:
             limit: максимум записей. None — все.
@@ -295,8 +300,7 @@ class VacancyStorage:
         embedding: list[float],
         model: str,
     ) -> bool:
-        """
-        Сохраняет эмбеддинг вакансии в vacancy_analysis.
+        """Сохраняет эмбеддинг вакансии в vacancy_analysis.
 
         Args:
             vacancy_id: ID вакансии.
@@ -308,7 +312,7 @@ class VacancyStorage:
             True, если запись обновлена.
         """
         # pgvector принимает вектор строкой '[v1,v2,...]'
-        vec_str = "[" + ",".join(map(str, embedding)) + "]"
+        vec_str = self._serialize_vector(embedding)
 
         try:
             with self.conn.cursor() as cur:
@@ -325,7 +329,8 @@ class VacancyStorage:
                         embedding_text,
                         vec_str,
                         model,
-                        datetime.now().isoformat(),
+                        # Сохраняем локальное время и прежний формат даты.
+                        datetime.now().isoformat(),  # noqa: DTZ005
                         vacancy_id,
                     ),
                 )
@@ -336,8 +341,7 @@ class VacancyStorage:
             raise
 
     def get_unembedded(self, limit: int | None = None) -> list[dict]:
-        """
-        Возвращает vacancy_analysis с JOIN vacancies, где ещё нет эмбеддинга.
+        """Возвращает vacancy_analysis с JOIN vacancies, где ещё нет эмбеддинга.
 
         Args:
             limit: максимум записей. None — все.
@@ -371,9 +375,22 @@ class VacancyStorage:
         embedding: list[float],
         model: str,
     ) -> int:
-        """Сохраняет резюме с анализом и эмбеддингом. Возвращает id."""
-        vec_str = "[" + ",".join(map(str, embedding)) + "]"
-        now = datetime.now().isoformat()
+        """Сохраняет резюме с анализом и эмбеддингом. Возвращает id.
+
+        Args:
+            title: название резюме.
+            source_text: исходный текст резюме.
+            analysis: структурированный результат извлечения полей.
+            embedding_text: текст, использованный для эмбеддинга.
+            embedding: вектор эмбеддинга.
+            model: имя модели эмбеддинга.
+
+        Returns:
+            ID сохранённого резюме.
+        """
+        vec_str = self._serialize_vector(embedding)
+        # Сохраняем локальное время и прежний формат даты.
+        now = datetime.now().isoformat()  # noqa: DTZ005
 
         try:
             with self.conn.cursor() as cur:
@@ -433,7 +450,14 @@ class VacancyStorage:
             raise
 
     def get_resume(self, resume_id: int) -> dict | None:
-        """Возвращает резюме по id или None."""
+        """Возвращает резюме по id или None.
+
+        Args:
+            resume_id: ID резюме.
+
+        Returns:
+            Строка резюме либо None.
+        """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("SELECT * FROM resumes WHERE id = %s", (resume_id,))
             return cur.fetchone()
@@ -444,8 +468,7 @@ class VacancyStorage:
         resume: dict,
         top_n: int = 20,
     ) -> list[dict]:
-        """
-        Векторный поиск top-N вакансий с жёсткими фильтрами по резюме.
+        """Векторный поиск top-N вакансий с жёсткими фильтрами по резюме.
 
         Фильтры применяются мягко: если данных для фильтра нет — он пропускается.
 
@@ -457,29 +480,8 @@ class VacancyStorage:
         Returns:
             Список словарей с полями вакансии + score.
         """
-        vec_str = "[" + ",".join(map(str, embedding)) + "]"
-        where = ["a.embedding IS NOT NULL"]
-        params: list = []
-
-        # 1. Опыт
-        years = resume.get("experience_years")
-        allowed = self._allowed_experience(years)
-        if allowed:
-            where.append("v.experience = ANY(%s)")
-            params.append(allowed)
-
-        # 2. Зарплата: отсеиваем только явные провалы
-        salary_min = resume.get("salary_min")
-        if salary_min:
-            where.append("(v.salary_to IS NULL OR v.salary_to >= %s)")
-            params.append(salary_min)
-
-        # 3. Город: если не готов к переезду — требуем совпадения или REMOTE
-        if not resume.get("ready_to_relocate"):
-            city = resume.get("city")
-            if city and city != "unknown":
-                where.append("(v.city = %s OR v.work_format ILIKE '%%REMOTE%%')")
-                params.append(city)
+        vec_str = self._serialize_vector(embedding)
+        where, params = self._build_match_filters(resume)
 
         where_sql = " AND ".join(where)
 
@@ -503,9 +505,54 @@ class VacancyStorage:
             return cur.fetchall()
 
     @staticmethod
-    def _allowed_experience(years: int | None) -> list[str] | None:
+    def _serialize_vector(embedding: list[float]) -> str:
+        """Возвращает строковое представление вектора для приведения ::vector.
+
+        Args:
+            embedding: вектор эмбеддинга.
+
+        Returns:
+            Строка вида [v1,v2,...].
         """
-        Маппит годы опыта в допустимые значения hh.ru enum.
+        return "[" + ",".join(map(str, embedding)) + "]"
+
+    def _build_match_filters(self, resume: dict) -> tuple[list[str], list[Any]]:
+        """Строит SQL-условия по резюме и параметры в порядке условий.
+
+        Args:
+            resume: словарь с полями резюме.
+
+        Returns:
+            Условия WHERE и параметры в соответствующем порядке.
+        """
+        where = ["a.embedding IS NOT NULL"]
+        params: list[Any] = []
+
+        # 1. Опыт
+        years = resume.get("experience_years")
+        allowed = self._allowed_experience(years)
+        if allowed:
+            where.append("v.experience = ANY(%s)")
+            params.append(allowed)
+
+        # 2. Зарплата: отсеиваем только явные провалы
+        salary_min = resume.get("salary_min")
+        if salary_min:
+            where.append("(v.salary_to IS NULL OR v.salary_to >= %s)")
+            params.append(salary_min)
+
+        # 3. Город: если не готов к переезду — требуем совпадения или REMOTE
+        if not resume.get("ready_to_relocate"):
+            city = resume.get("city")
+            if city and city != "unknown":
+                where.append("(v.city = %s OR v.work_format ILIKE '%%REMOTE%%')")
+                params.append(city)
+
+        return where, params
+
+    @staticmethod
+    def _allowed_experience(years: int | None) -> list[str] | None:
+        """Маппит годы опыта в допустимые значения hh.ru enum.
 
         Args:
             years: число лет опыта из резюме.
@@ -522,11 +569,13 @@ class VacancyStorage:
         return ["between3And6", "moreThan6"]
 
     def add_vacancies(self, vacancies: list[dict]) -> tuple[int, int, int]:
-        """
-        Добавляет список вакансий.
+        """Добавляет список вакансий.
 
         Returns:
             Кортеж (добавлено, ошибок, всего).
+
+        Args:
+            vacancies: список словарей вакансий.
         """
         added = errors = 0
         for vacancy in vacancies:
@@ -534,14 +583,22 @@ class VacancyStorage:
                 if self.add_vacancy(vacancy):
                     added += 1
                 else:
-                    logger.info(f"Duplicate: {vacancy.get('url')}")
-            except Exception as e:
-                logger.error(f"Failed to add {vacancy.get('name')}: {e}")
+                    logger.info("Duplicate: %s", vacancy.get("url"))
+            except Exception as e:  # noqa: BLE001 -- сохранить обработку всех ошибок операции
+                logger.error("Failed to add %s: %s", vacancy.get("name"), e)
                 errors += 1
         return added, errors, len(vacancies)
 
     def get_all(self, limit: int | None = None, offset: int = 0) -> list[dict]:
-        """Возвращает вакансии (сортировка по id DESC) с пагинацией."""
+        """Возвращает вакансии (сортировка по id DESC) с пагинацией.
+
+        Args:
+            limit: максимальное число записей; None — без ограничения.
+            offset: число пропускаемых записей; применяется только при заданном limit.
+
+        Returns:
+            Вакансии в порядке id DESC.
+        """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             query = "SELECT * FROM vacancies ORDER BY id DESC"
             if limit is not None:
@@ -552,8 +609,7 @@ class VacancyStorage:
             return cur.fetchall()
 
     def get_by_name(self, patterns: list[str], limit: int | None = None) -> list[dict]:
-        """
-        Возвращает вакансии, у которых в name встречается любой из patterns
+        """Возвращает вакансии, у которых в name встречается любой из patterns
         (регистронезависимо, ILIKE).
 
         Args:
@@ -579,17 +635,30 @@ class VacancyStorage:
             return cur.fetchall()
 
     def get_by_url(self, url: str) -> dict | None:
-        """Возвращает вакансию по URL или None."""
+        """Возвращает вакансию по URL или None.
+
+        Args:
+            url: URL страницы вакансии.
+
+        Returns:
+            Вакансия либо None.
+        """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("SELECT * FROM vacancies WHERE url = %s", (url,))
             return cur.fetchone()
 
     def get_by_date(self, start_date: str, end_date: str) -> list[dict]:
-        """
-        Возвращает вакансии за диапазон дат collected_at (ISO-8601).
+        """Возвращает вакансии за диапазон дат collected_at (ISO-8601).
 
         Если end_date передана как 'YYYY-MM-DD' (10 символов), расширяется
         до конца дня.
+
+        Args:
+            start_date: начало диапазона collected_at в ISO-8601.
+            end_date: конец диапазона; дата без времени расширяется до конца дня.
+
+        Returns:
+            Вакансии в указанном диапазоне collected_at.
         """
         if len(end_date) == 10:
             end_date += "T23:59:59.999999"
@@ -601,13 +670,24 @@ class VacancyStorage:
             return cur.fetchall()
 
     def count(self) -> int:
-        """Возвращает общее количество записей."""
+        """Возвращает общее количество записей.
+
+        Returns:
+            Число записей vacancies.
+        """
         with self.conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM vacancies")
             return cur.fetchone()[0]
 
     def exists(self, url: str) -> bool:
-        """Проверяет, есть ли вакансия с данным URL в БД."""
+        """Проверяет, есть ли вакансия с данным URL в БД.
+
+        Args:
+            url: URL страницы вакансии.
+
+        Returns:
+            True, если URL присутствует в БД.
+        """
         with self.conn.cursor() as cur:
             cur.execute("SELECT EXISTS(SELECT 1 FROM vacancies WHERE url = %s)", (url,))
             return cur.fetchone()[0]
@@ -617,8 +697,25 @@ class VacancyStorage:
         if self.conn and not self.conn.closed:
             self.conn.close()
 
-    def __enter__(self) -> "VacancyStorage":
+    def __enter__(self) -> "VacancyStorage":  # noqa: PYI034 -- совместимо с Python 3.10
+        """Возвращает открытое хранилище для блока with.
+
+        Returns:
+            Текущее хранилище.
+        """
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Закрывает соединение, не подавляя исключение блока with.
+
+        Args:
+            exc_type: тип исключения блока with или None.
+            exc_val: исключение блока with или None.
+            exc_tb: трассировка исключения или None.
+        """
         self.close()

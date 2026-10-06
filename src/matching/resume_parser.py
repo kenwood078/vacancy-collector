@@ -9,11 +9,10 @@ TEXT_EXTENSIONS = {".txt", ".md", ".text"}
 
 
 def parse_resume(path: str | Path) -> str:
-    """
-    Читает текст резюме из файла.
+    """Читает текст резюме из файла.
 
     Args:
-        path: путь к файлу (.txt, .md).
+        path: путь к файлу (.txt, .md, .text).
 
     Returns:
         Содержимое файла как строка.
@@ -21,6 +20,8 @@ def parse_resume(path: str | Path) -> str:
     Raises:
         FileNotFoundError: если файла нет.
         ValueError: если расширение не поддерживается.
+        OSError: если файл недоступен для чтения.
+        UnicodeDecodeError: если содержимое не является UTF-8.
     """
     p = Path(path)
     if not p.exists():

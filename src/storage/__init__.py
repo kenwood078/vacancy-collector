@@ -1,1 +1,1 @@
-from .db import VacancyStorage
+from .db import VacancyStorage as VacancyStorage
