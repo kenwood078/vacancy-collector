@@ -16,8 +16,6 @@ logger = logging.getLogger(__name__)
 
 MARKDOWN_FENCE = _MARKDOWN_FENCE
 
-MARKDOWN_FENCE = _MARKDOWN_FENCE
-
 ARCHIVE_MARKERS = ["вакансия в архиве", "в архиве с"]
 
 PROMPT_TEMPLATE = """Извлеки данные из текста вакансии. Верни ТОЛЬКО валидный JSON без markdown:

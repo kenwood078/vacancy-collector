@@ -1,4 +1,5 @@
 """Проверка detail-страницы hh.ru: description + keySkills."""
+
 import json
 import os
 import sys
@@ -15,7 +16,9 @@ HH_XSRF = os.getenv("HH_XSRF")
 session = requests.Session()
 session.cookies.set("hhtoken", HH_TOKEN, domain=".hh.ru")
 session.cookies.set("_xsrf", HH_XSRF, domain=".hh.ru")
-session.headers.update({"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
+session.headers.update(
+    {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
+)
 
 vacancy_id = sys.argv[1] if len(sys.argv) > 1 else "131729634"
 url = f"https://hh.ru/vacancy/{vacancy_id}"
@@ -41,5 +44,5 @@ if skills:
 print(f"\nДлина описания: {len(desc_text)}")
 print(f"Ключевых навыков: {len(skills)}")
 print(f"Итоговая длина requirements: {len(requirements)}")
-print(f"\n=== Первые 500 символов ===")
+print("\n=== Первые 500 символов ===")
 print(requirements[:500])

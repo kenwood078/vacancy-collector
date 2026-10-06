@@ -1,4 +1,5 @@
 """Проверка cookie-сессии hh.ru: можно ли получать вакансии через requests."""
+
 import logging
 import os
 
@@ -17,14 +18,16 @@ if not HH_TOKEN or not HH_XSRF:
 session = requests.Session()
 session.cookies.set("hhtoken", HH_TOKEN, domain=".hh.ru")
 session.cookies.set("_xsrf", HH_XSRF, domain=".hh.ru")
-session.headers.update({
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
-    ),
-    "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
-    "Referer": "https://hh.ru/",
-})
+session.headers.update(
+    {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        ),
+        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+        "Referer": "https://hh.ru/",
+    }
+)
 
 url = "https://hh.ru/search/vacancy"
 params = {

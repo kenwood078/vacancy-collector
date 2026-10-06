@@ -1,7 +1,9 @@
-from src.storage import VacancyStorage
-from src.analytics.llm_extractor import VacancyExtractor
-from crewai import LLM
 import json
+
+from crewai import LLM
+
+from src.analytics.llm_extractor import VacancyExtractor
+from src.storage import VacancyStorage
 
 llm = LLM(
     model="openai/gpt-oss-20b",

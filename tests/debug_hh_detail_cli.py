@@ -13,5 +13,7 @@ for i, v in enumerate(results[:10], 1):
         print(f"{i}. {vid} — SKIP (None)")
         continue
 
-    print(f"{i}. {vid} — desc={detail['description']}, skills={detail['key_skills']}, req={detail['requirements_text']}")
+    print(
+        f"{i}. {vid} — desc={detail['description']}, skills={detail['key_skills']}, req={detail['requirements_text']}"
+    )
     print(f"   {v['name'][:70]}")

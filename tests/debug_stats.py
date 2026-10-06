@@ -1,6 +1,7 @@
 import json
-from src.storage import VacancyStorage
+
 from src.analytics.stats import compute_statistics
+from src.storage import VacancyStorage
 
 with VacancyStorage() as s:
     vacancies = s.get_all()

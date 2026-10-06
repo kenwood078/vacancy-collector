@@ -37,7 +37,9 @@ def main() -> None:
     print(f"first 5 values: {[round(v, 4) for v in vec[:5]]}\n")
 
     # 2. Документ без префикса
-    doc = "Сетевой инженер. Стек: Cisco, BGP, OSPF, Linux. Задачи: настройка, мониторинг."
+    doc = (
+        "Сетевой инженер. Стек: Cisco, BGP, OSPF, Linux. Задачи: настройка, мониторинг."
+    )
     t0 = time.time()
     v_doc = embed(doc)
     print(f"document embed: {time.time() - t0:.2f}s")

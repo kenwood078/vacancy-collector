@@ -1,4 +1,5 @@
 """Извлекаем JSON из HH-Lux-InitialState."""
+
 import json
 
 from bs4 import BeautifulSoup
@@ -25,7 +26,9 @@ sample = result["vacancies"][0]
 print("\n=== Первая вакансия ===")
 for k in sorted(sample.keys()):
     v = sample[k]
-    preview = f"{type(v).__name__}[{len(v)}]" if isinstance(v, (dict, list)) else repr(v)[:80]
+    preview = (
+        f"{type(v).__name__}[{len(v)}]" if isinstance(v, (dict, list)) else repr(v)[:80]
+    )
     print(f"  {k}: {preview}")
 
 sample = result["vacancies"][0]
