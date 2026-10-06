@@ -26,7 +26,6 @@ BASE_DIR = os.path.dirname(__file__)
 AGENTS_DIR = os.path.join(BASE_DIR, "agents")
 CREW_CONFIG_PATH = os.path.join(BASE_DIR, "crew.jsonc")
 OUTPUTS_DIR = os.path.join(BASE_DIR, "outputs")
-os.makedirs(OUTPUTS_DIR, exist_ok=True)
 LLM_MODEL = os.getenv("LLM_MODEL", "openai/ornith-1.0-9b-mlx@8bit")
 LLM_MODEL_EXTRACTOR = os.getenv("LLM_MODEL_EXTRACTOR", LLM_MODEL)
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:1234/v1")
@@ -225,6 +224,7 @@ def _save_task_outputs(
             else f"task_{i}_{timestamp}.txt"
         )
         filepath = os.path.join(OUTPUTS_DIR, filename)
+        os.makedirs(OUTPUTS_DIR, exist_ok=True)
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(task.output.raw)
         saved_files.append(filepath)
@@ -342,12 +342,21 @@ def cmd_embed_vacancies(n: int | None = None) -> None:
             text = build_vacancy_text(row)
             try:
                 vec = embedder.embed_document(text)
-                storage.save_embedding(
+                saved = storage.save_embedding(
                     vacancy_id=row["vacancy_id"],
                     embedding_text=text,
                     embedding=vec,
                     model=embedder.model,
                 )
+                if not saved:
+                    failed += 1
+                    logger.error(
+                        "[%d/%d] save did not update id=%s",
+                        i,
+                        total,
+                        row["vacancy_id"],
+                    )
+                    continue
                 added += 1
                 logger.info(
                     "[%d/%d] ok: id=%s dim=%d",
@@ -472,13 +481,15 @@ def cmd_match(resume_id: int, top_n: int = 20) -> None:
 
     for i, m in enumerate(matches, start=1):
         _print_match(i, m)
-        md = build_match_report(resume, matches)
-        # Сохраняем локальное время и прежний формат даты.
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005
-        path = os.path.join(OUTPUTS_DIR, f"match_resume_{resume_id}_{ts}.md")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(md)
-        print(f"\nОтчёт: {path}")
+
+    md = build_match_report(resume, matches)
+    # Сохраняем локальное время и прежний формат даты.
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005
+    path = os.path.join(OUTPUTS_DIR, f"match_resume_{resume_id}_{ts}.md")
+    os.makedirs(OUTPUTS_DIR, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(md)
+    print(f"\nОтчёт: {path}")
 
 
 def cmd_all_serper(n: int, no_cache: bool = False) -> None:
@@ -502,9 +513,12 @@ def cmd_all_hh(n: int) -> None:
     cmd_report()
 
 
-def main() -> None:
-    """Разбирает аргументы CLI и запускает выбранную команду."""
-    setup_logging()
+def _build_parser() -> argparse.ArgumentParser:
+    """Создаёт CLI-парсер с командами и их аргументами.
+
+    Returns:
+        Парсер с прежними параметрами, defaults и текстами справки.
+    """
     parser = argparse.ArgumentParser(description="Collector & Reporter")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -545,6 +559,13 @@ def main() -> None:
     p_all_serper.add_argument("--n", type=int, default=10)
     p_all_serper.add_argument("--no-cache", action="store_true")
 
+    return parser
+
+
+def main() -> None:
+    """Разбирает аргументы CLI и запускает выбранную команду."""
+    setup_logging()
+    parser = _build_parser()
     args = parser.parse_args()
 
     if args.command == "collect-serper":

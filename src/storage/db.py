@@ -159,57 +159,61 @@ class VacancyStorage:
             if not vacancy.get(field):
                 raise ValueError(f"Field '{field}' is required and cannot be empty")
 
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO vacancies (
-                    url, name, city,
-                    employer, employer_id, employer_rating, employer_reviews_count,
-                    salary, salary_from, salary_to, salary_currency, salary_gross,
-                    requirements, key_skills,
-                    experience, work_format, employment_form, schedule, professional_role,
-                    published_at, responses_count,
-                    collected_at
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO vacancies (
+                        url, name, city,
+                        employer, employer_id, employer_rating, employer_reviews_count,
+                        salary, salary_from, salary_to, salary_currency, salary_gross,
+                        requirements, key_skills,
+                        experience, work_format, employment_form, schedule, professional_role,
+                        published_at, responses_count,
+                        collected_at
+                    )
+                    VALUES (
+                        %s, %s, %s,
+                        %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s,
+                        %s
+                    )
+                    ON CONFLICT (url) DO NOTHING
+                    """,
+                    (
+                        vacancy["url"],
+                        vacancy["name"],
+                        vacancy.get("city"),
+                        vacancy["employer"],
+                        vacancy.get("employer_id"),
+                        vacancy.get("employer_rating"),
+                        vacancy.get("employer_reviews_count"),
+                        vacancy.get("salary"),
+                        vacancy.get("salary_from"),
+                        vacancy.get("salary_to"),
+                        vacancy.get("salary_currency"),
+                        vacancy.get("salary_gross"),
+                        vacancy.get("requirements"),
+                        vacancy.get("key_skills"),
+                        vacancy.get("experience"),
+                        vacancy.get("work_format"),
+                        vacancy.get("employment_form"),
+                        vacancy.get("schedule"),
+                        vacancy.get("professional_role"),
+                        vacancy.get("published_at"),
+                        vacancy.get("responses_count"),
+                        # Сохраняем локальное время и прежний формат даты.
+                        datetime.now().isoformat(),  # noqa: DTZ005
+                    ),
                 )
-                VALUES (
-                    %s, %s, %s,
-                    %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s,
-                    %s, %s,
-                    %s, %s, %s, %s, %s,
-                    %s, %s,
-                    %s
-                )
-                ON CONFLICT (url) DO NOTHING
-                """,
-                (
-                    vacancy["url"],
-                    vacancy["name"],
-                    vacancy.get("city"),
-                    vacancy["employer"],
-                    vacancy.get("employer_id"),
-                    vacancy.get("employer_rating"),
-                    vacancy.get("employer_reviews_count"),
-                    vacancy.get("salary"),
-                    vacancy.get("salary_from"),
-                    vacancy.get("salary_to"),
-                    vacancy.get("salary_currency"),
-                    vacancy.get("salary_gross"),
-                    vacancy.get("requirements"),
-                    vacancy.get("key_skills"),
-                    vacancy.get("experience"),
-                    vacancy.get("work_format"),
-                    vacancy.get("employment_form"),
-                    vacancy.get("schedule"),
-                    vacancy.get("professional_role"),
-                    vacancy.get("published_at"),
-                    vacancy.get("responses_count"),
-                    # Сохраняем локальное время и прежний формат даты.
-                    datetime.now().isoformat(),  # noqa: DTZ005
-                ),
-            )
-            self.conn.commit()
-            return cur.rowcount > 0
+                self.conn.commit()
+                return cur.rowcount > 0
+        except Exception:
+            self.conn.rollback()
+            raise
 
     def save_analysis(self, analysis: dict) -> bool:
         """Upsert анализа вакансии в vacancy_analysis.
@@ -223,43 +227,47 @@ class VacancyStorage:
         Returns:
             True, если запись вставлена или обновлена.
         """
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO vacancy_analysis (
-                    vacancy_id,
-                    stack, tasks, certifications, domains,
-                    programming_languages, english_level,
-                    llm_model, prompt_version, analyzed_at
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO vacancy_analysis (
+                        vacancy_id,
+                        stack, tasks, certifications, domains,
+                        programming_languages, english_level,
+                        llm_model, prompt_version, analyzed_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (vacancy_id) DO UPDATE SET
+                        stack = EXCLUDED.stack,
+                        tasks = EXCLUDED.tasks,
+                        certifications = EXCLUDED.certifications,
+                        domains = EXCLUDED.domains,
+                        programming_languages = EXCLUDED.programming_languages,
+                        english_level = EXCLUDED.english_level,
+                        llm_model = EXCLUDED.llm_model,
+                        prompt_version = EXCLUDED.prompt_version,
+                        analyzed_at = EXCLUDED.analyzed_at
+                    """,
+                    (
+                        analysis["vacancy_id"],
+                        analysis["stack"],
+                        analysis["tasks"],
+                        analysis["certifications"],
+                        analysis["domains"],
+                        analysis["programming_languages"],
+                        analysis["english_level"],
+                        analysis["llm_model"],
+                        analysis["prompt_version"],
+                        # Сохраняем локальное время и прежний формат даты.
+                        datetime.now().isoformat(),  # noqa: DTZ005
+                    ),
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (vacancy_id) DO UPDATE SET
-                    stack = EXCLUDED.stack,
-                    tasks = EXCLUDED.tasks,
-                    certifications = EXCLUDED.certifications,
-                    domains = EXCLUDED.domains,
-                    programming_languages = EXCLUDED.programming_languages,
-                    english_level = EXCLUDED.english_level,
-                    llm_model = EXCLUDED.llm_model,
-                    prompt_version = EXCLUDED.prompt_version,
-                    analyzed_at = EXCLUDED.analyzed_at
-                """,
-                (
-                    analysis["vacancy_id"],
-                    analysis["stack"],
-                    analysis["tasks"],
-                    analysis["certifications"],
-                    analysis["domains"],
-                    analysis["programming_languages"],
-                    analysis["english_level"],
-                    analysis["llm_model"],
-                    analysis["prompt_version"],
-                    # Сохраняем локальное время и прежний формат даты.
-                    datetime.now().isoformat(),  # noqa: DTZ005
-                ),
-            )
-            self.conn.commit()
-            return cur.rowcount > 0
+                self.conn.commit()
+                return cur.rowcount > 0
+        except Exception:
+            self.conn.rollback()
+            raise
 
     def get_analyzed_ids(self) -> set[int]:
         """Возвращает set vacancy_id, для которых уже есть анализ.

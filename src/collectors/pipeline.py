@@ -2,7 +2,6 @@ import logging
 from typing import TYPE_CHECKING
 
 from src.collectors.extractor import extract_vacancy
-from src.collectors.hh_client import HHClient
 from src.collectors.scraper import scrape
 from src.collectors.serper import SerperClient
 from src.storage import VacancyStorage
@@ -48,6 +47,9 @@ def collect_hh(
     Returns:
         (added, errors, attempts).
     """
+    # HH cookies нужны только для прямого сбора.
+    from src.collectors.hh_client import HHClient
+
     client = HHClient()
     added = errors = attempts = 0
     page = 0
