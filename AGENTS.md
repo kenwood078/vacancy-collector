@@ -1,123 +1,146 @@
-                                                             # AGENTS.md
+# AGENTS.md
 
 ## Project overview
 
-Vacancy collector and analyst for hh.ru.
-Collects vacancies, extracts structured fields via local LLM, stores in PostgreSQL
-with pgvector embeddings, and matches resumes to vacancies by cosine similarity.
+Коллектор вакансий hh.ru, аналитика через локальную LLM и подбор под резюме.
+Python 3.10–3.13, PostgreSQL 18 + pgvector, CrewAI, LM Studio.
+Подробные команды, настройки и схема описаны в `README.md`; используй его
+для изменений соответствующего сценария, а не перечитывай весь проект
+перед каждой небольшой правкой.
 
-Python 3.10+, PostgreSQL 18 + pgvector, CrewAI, LM Studio (OpenAI-compatible).
+## Setup and checks
 
-## Commands
-
-**Setup**
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
-cp .env.example .env  # заполнить DB_*, HH_*, SERPER_API_KEY, LLM_*
+python -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
+cp .env.example .env  # только при первоначальной настройке
 ```
 
-**Run**
-```bash
-python main.py collect-hh --n 50
-python main.py analyze
-python main.py embed-vacancies
-python main.py save-resume --path data/resume.txt
-python main.py match --resume-id 6
-```
+Ruff закреплён в `pyproject.toml`, длина строки 88:
 
-**Lint / format**
 ```bash
 ruff check .
-ruff format .
+ruff format . --check
 ```
 
-**Tests**
+`ruff format .` изменяет файлы; запускай его только в рамках разрешённых правок.
+Для Markdown-правок достаточно проверки diff, без подключения к сервисам.
+
+Статическая проверка импорта хранилища, без подключения к БД:
+
 ```bash
-pytest
+python -c "from src.storage import VacancyStorage"
 ```
 
-## Architecture
+При изменениях хранилища можно проверить настроенную локальную БД:
 
-```
-src/
-├── collectors/     # hh_client, serper, scraper, extractor, pipeline
-├── analytics/      # llm_extractor (вакансии), resume_extractor (резюме), stats
-├── storage/        # db.py (VacancyStorage), cache.py
-├── matching/       # embedder, embedding_text, matcher, match_report, resume_parser
-└── tools/          # stats_tool (CrewAI)
+```bash
+python -c "from src.storage import VacancyStorage; VacancyStorage().close()"
 ```
 
-Data flow: collect → analyze (LLM) → embed (Qwen3-Embedding-4B) → match.
+Это подключение к PostgreSQL и выполнение DDL, а не проверка только импортов.
+Не запускай его на неподтверждённом окружении или после несвязанных правок.
 
-DB schema: `vacancies` (raw), `vacancy_analysis` (structured + embedding),
-`resumes` (structured + embedding). Embeddings — `vector(2560)`.
+## Architecture and public interfaces
 
-## Code style
+- `src/collectors/`: HHClient, SerperClient, scraper, extractor, pipeline.
+- `src/analytics/`: VacancyExtractor, ResumeExtractor, stats, skills_keywords;
+  `_extraction_utils.py` содержит общую очистку ответов LLM.
+- `src/storage/`: VacancyStorage и файловый SearchCache.
+- `src/matching/`: QwenEmbedder, embedding_text, matcher, match_report, resume_parser.
+- `src/tools/stats_tool.py`: CrewAI-инструмент GetStatsTool.
+- `main.py`: CLI и запуск CrewAI writer.
 
-- Ruff for lint and format. Line length 88.
-- Type hints on all functions, Google-style docstrings.
-- `logging` module, not `print` (кроме CLI-вывода).
-- f-strings, but `logger.info("... %s", x)` for lazy formatting.
-- No bare `except`. Specific exception types.
+Поток: collect → analyze → embed-vacancies → match.
+Резюме: parse_resume → ResumeExtractor → embed_query → save_resume.
+`all-hh` и `all-serper` выполняют сбор и отчёт рынка, без анализа и эмбеддингов.
 
-## LLM / embedding
+При рефакторинге сохраняй публичные имена, параметры, defaults, результаты
+и поведение, если пользователь явно не запросил изменение:
 
-- Extractor: `gpt-oss-20b` via LM Studio (`LLM_MODEL_EXTRACTOR`).
-- Writer: `ornith-1.0-9b-mlx` (`LLM_MODEL`).
-- Embedder: `text-embedding-qwen3-embedding-4b`, dim 2560.
-- `embed_document` (без инструкции) — для вакансий.
-- `embed_query` (с `Instruct: Given a resume, ...`) — для резюме.
-- Промпты: `PROMPT_VERSION` в `llm_extractor.py` и `resume_extractor.py`.
-  При изменении промпта — поднимать версию.
+- CLI: `analyze`, `embed-vacancies`, `save-resume`, `match`, `collect-hh`,
+  `collect-serper`, `report`, `all-hh`, `all-serper`; аргументы и справка.
+- Все публичные методы VacancyStorage, включая `add_vacancy`, `add_vacancies`,
+  `save_analysis`, `save_embedding`, `save_resume`, `get_analyzed_ids`,
+  `get_unanalyzed`, `get_unembedded`, `get_resume`, `find_top_vacancies`,
+  `get_all`, `get_by_name`, `get_by_url`, `get_by_date`, `exists`, `count`,
+  `close`, `__enter__`, `__exit__`; реэкспорт из `src.storage`.
+- Функции `build_match_report`, `build_vacancy_text`, `build_resume_text`,
+  `match_resume`, `parse_resume` и остальные публичные функции модулей.
+- Классы VacancyExtractor, ResumeExtractor, QwenEmbedder и их публичные методы.
 
-## Testing
+Не вводи mixin, абстрактные классы, Protocol или общий pipeline без конкретной
+необходимости. Парсеры зарплат имеют разную семантику; не объединяй их механически.
 
-- `tests/` — debug-скрипты для ручной проверки (`debug_*.py`), не pytest.
-- При рефакторинге не удалять debug-скрипты без явного запроса.
-- Новые тесты — pytest, в `tests/test_*.py`.
-- Чистые функции (`_clean`, `_validate`, `_parse_salary`, `_stack_overlap`) —
-  покрывать в первую очередь.
+## Code style and error handling
 
-## Database
+- Type hints для всех функций и методов, Google-style docstrings.
+- `logging`, а не `print`; `print` допустим в CLI и ручных debug-скриптах.
+- Ленивое форматирование логов: `logger.info("... %s", value)`.
+- Не используй bare `except`. Предпочитай конкретные исключения.
+- `except Exception` допустим для rollback с повторным выбрасыванием и для
+  существующих границ обработки отдельной записи. Не сужай эти обработчики
+  без проверки влияния на поведение; объясняй точечные подавления Ruff.
+- Методы записи в БД выполняют commit на запись; при ошибке операции — rollback
+  и повторное выбрасывание исключения. Не переноси транзакции между слоями
+  и не добавляй повторные попытки без явной задачи.
+- Локальные импорты допустимы для циклов и отложенной загрузки зависимости:
+  HHClient импортируется внутри `collect_hh`, чтобы Serper не требовал HH cookies.
 
-- PostgreSQL 18 + pgvector. Расширение `vector` должно быть установлено.
-- Миграции не автоматические. Схема создаётся в `VacancyStorage._create_table`
-  через `CREATE TABLE IF NOT EXISTS`.
-- При изменении схемы — обновлять `_create_table` и вручную пересоздавать
-  таблицу (`DROP TABLE ...`).
-- `TEXT[]` для списков (stack, tasks, domains). Не менять на `TEXT` через запятую.
-- `embedding vector(2560)` — размерность Qwen3-Embedding-4B. Не менять без
-  пересчёта всех эмбеддингов.
+## LLM and embeddings
 
-## Boundaries — do not touch
+- Настройки и defaults определены кодом и `.env.example`.
+  `LLM_MODEL_EXTRACTOR` выбирает extractor-модель, например gpt-oss-20b;
+  при отсутствии используется `LLM_MODEL`.
+- `LLM_MODEL` — writer и извлечение при сборе Serper, обычно ornith-1.0-9b-mlx.
+- Эмбеддер: text-embedding-qwen3-embedding-4b, размерность 2560.
+- `embed_document` — вакансии без инструкции; `embed_query` — резюме с инструкцией
+  `Given a resume, retrieve relevant job vacancies`.
+- Embedding-тексты вакансии и резюме симметричны: подписи, порядок полей,
+  пустые значения и разделители нельзя менять только с одной стороны.
+  Изменение текста требует плана пересчёта затронутых эмбеддингов.
+- В llm_extractor и resume_extractor сохраняй JSON-схему промптов: ключи и типы.
+  При изменении промпта повышай соответствующий `PROMPT_VERSION`.
+- gpt-oss-20b — reasoning-модель, около трёх минут на вакансию.
+  Для проверок используй `python main.py analyze --n 1`; не запускай обработку
+  всей большой выборки без явного запроса пользователя.
 
-- `.env` — не редактировать, не коммитить. Только `.env.example`.
-- `data/`, `outputs/` — в `.gitignore`. Не добавлять в git.
-- `crew.jsonc`, `agents/*.jsonc` — рабочий конфиг CrewAI. Менять только
-  по явному запросу.
-- `db.py` — при рефакторинге сохранять публичные имена методов:
-  `save_analysis`, `save_embedding`, `save_resume`, `find_top_vacancies`,
-  `get_unanalyzed`, `get_unembedded`, `get_resume`.
-- Промпты в `llm_extractor` / `resume_extractor` — при изменении
-  сохранять структуру JSON-ответа (ключи, типы).
+## Database and output invariants
 
-## Workflow for refactoring
+- Таблицы: `vacancies`, `vacancy_analysis`, `resumes`.
+  Точная схема — в `VacancyStorage._create_table`.
+- Конструктор создаёт недостающие таблицы, расширение vector и индексы.
+  `CREATE TABLE IF NOT EXISTS` не обновляет существующую схему.
+- Автоматических миграций нет. Изменение схемы требует обновления `_create_table`
+  и отдельного плана обновления существующей БД с сохранением данных.
+  Не используй `DROP TABLE` или пересоздание БД как стандартный способ миграции;
+  разрушительные операции требуют прямого запроса пользователя.
+- `stack`, `tasks`, `certifications`, `domains`, `programming_languages` — TEXT[].
+  `vacancies.key_skills` — строка через запятую; это другое представление.
+- Векторы — `vector(2560)`; не меняй размерность без плана пересчёта всех векторов.
+- Не регистрируй общий адаптер Python list: он ломает TEXT[].
+  Вектор сериализуется строкой `[v1,v2,...]` и передаётся через `%s::vector`.
+- psycopg2 возвращает vector строкой; преобразование — через `_parse_vector`.
+- Счётчик сохранённых эмбеддингов учитывает результат `save_embedding`.
+- `cmd_match` сохраняет один полный Markdown-отчёт после вывода вакансий,
+  включая пустой результат. Каталог outputs создаётся при записи отчёта.
 
-1. Прочитай `AGENTS.md` и `README.md`.
-2. Не меняй публичные сигнатуры функций без явного запроса.
-3. После изменений — `ruff check .` и
-   `python -c "from src.storage import VacancyStorage; VacancyStorage().close()"`
-   для проверки импортов.
-4. Не коммить. Оставить изменения в рабочем дереве для ревью.
-5. Если что-то неясно — спросить, не догадываться.
+## Testing and workflow
 
-## Gotchas
-
-- `register_adapter(list, ...)` в `db.py` нельзя возвращать — он ломает
-  `TEXT[]`-поля. Вектор передаётся строкой `'[v1,v2,...]'::vector`.
-- `psycopg2` возвращает `vector` как строку. Парсить через `_parse_vector`.
-- `embedding_text` симметричен для вакансии и резюме. Порядок полей
-  фиксирован. Не менять порядок только в одной функции.
-- `gpt-oss-20b` — reasoning-модель, ~3 минуты на вакансию. Не запускать
-  `analyze` без `--n` на больших выборках без предупреждения.
+- `tests/debug_*.py` — ручные проверки; они могут обращаться к БД, LLM,
+  внешним API и записывать файлы. Не запускай их все автоматически.
+- Сейчас pytest-тестов нет. При их появлении запускай подходящие к изменению
+  тесты; новые тесты размещай в `tests/test_*.py`, учитывая ограничения задачи.
+- В первую очередь проверяй чистые функции очистки, валидации, зарплат,
+  embedding-текстов и пересечений. Для исправлений проверяй ошибку и восстановление,
+  а для CLI — параметры, счётчики и записанные отчёты.
+- Не удаляй debug-скрипты без явного запроса.
+- Не меняй `.env` и не выводи секреты; для примеров используй `.env.example`.
+- `data/`, `outputs/`, `tests/data/` не добавляй в Git.
+- `crew.jsonc`, `agents/*.jsonc` изменяй только по явному запросу.
+- Оставляй изменения в рабочем дереве для ревью. Commit, merge, push, теги
+  и публикация релиза — только по прямому запросу пользователя.
+- Уточняй неоднозначные требования, влияющие на поведение или данные.
+  Обычные решения по реализации принимай самостоятельно в рамках задачи.
+- В результате укажи изменения, выполненные проверки и непроверенные сценарии.
