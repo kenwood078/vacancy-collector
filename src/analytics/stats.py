@@ -1,16 +1,15 @@
 import re
 from collections import Counter
 
-from .skills_keywords import SKILLS_KEYWORDS
-
 UNKNOWN_CITY = "не определено"
 
 
-def compute_statistics(vacancies: list[dict]) -> dict:
+def compute_statistics(vacancies: list[dict], keywords: list[str]) -> dict:
     """Считает агрегированную статистику по списку вакансий.
 
     Args:
         vacancies: список словарей из БД.
+        keywords: явно переданный словарь навыков выбранного профиля.
 
     Returns:
         Словарь с ключами:
@@ -30,7 +29,7 @@ def compute_statistics(vacancies: list[dict]) -> dict:
         "by_experience": _count_by_field(vacancies, "experience"),
         "by_work_format": _count_work_formats(vacancies),
         "by_employment": _count_by_field(vacancies, "employment_form"),
-        "top_skills": get_top_skills(vacancies, top_n=10),
+        "top_skills": get_top_skills_for_keywords(vacancies, keywords, top_n=10),
         "top_key_skills": get_top_key_skills(vacancies, top_n=10),
         "salary_stats": _compute_salary_stats(vacancies),
         "employers": _get_top_employers(vacancies, top_n=10),
@@ -100,34 +99,78 @@ def _count_work_formats(vacancies: list[dict]) -> dict[str, int]:
     return dict(counter)
 
 
-def get_top_skills(vacancies: list[dict], top_n: int = 10) -> list[tuple[str, int]]:
-    """Извлекает навыки из поля requirements и возвращает топ-N.
+def get_top_skills_for_keywords(
+    vacancies: list[dict], keywords: list[str], top_n: int = 10
+) -> list[tuple[str, int]]:
+    """Считает навыки в requirements по переданному словарю.
 
     Каждый навык учитывается не более одного раза на вакансию.
 
     Args:
-        vacancies: список словарей вакансий.
-        top_n: максимальное число результатов.
+        vacancies: словари вакансий.
+        keywords: термины выбранного профиля, без изменения глобального словаря.
+        top_n: максимальное количество результатов.
 
     Returns:
-        Пары (навык, количество вакансий) в порядке частоты.
+        Навыки в нижнем регистре и число вакансий с каждым навыком.
     """
-    # Длинные навыки первыми, чтобы "VMware NSX" матчился раньше "VMware"
-    skills_sorted = sorted(SKILLS_KEYWORDS, key=len, reverse=True)
-    pattern = re.compile(
+    pattern = _skills_pattern(keywords)
+    if pattern is None:
+        return []
+
+    skill_counter = Counter()
+    for vacancy in vacancies:
+        text = vacancy.get("requirements") or ""
+        found = {match.group(0).lower() for match in pattern.finditer(text)}
+        skill_counter.update(found)
+    return skill_counter.most_common(top_n)
+
+
+def _skills_pattern(keywords: list[str]) -> re.Pattern[str] | None:
+    """Компилирует поиск терминов с границами слов.
+
+    Args:
+        keywords: непустые термины для поиска.
+
+    Returns:
+        Regex с длинными терминами первыми или None для пустого словаря.
+    """
+    if not keywords:
+        return None
+    # Длинные навыки первыми, чтобы "VMware NSX" матчился раньше "VMware".
+    skills_sorted = sorted(keywords, key=len, reverse=True)
+    return re.compile(
         r"(?<!\w)(" + "|".join(re.escape(s) for s in skills_sorted) + r")(?!\w)",
         re.IGNORECASE,
     )
 
-    skill_counter = Counter()
-    for v in vacancies:
-        text = v.get("requirements", "")
-        if not text:
-            continue
-        found = {m.group(0).lower() for m in pattern.finditer(text)}
-        skill_counter.update(found)
 
-    return skill_counter.most_common(top_n)
+def compute_skill_groups(
+    vacancies: list[dict], groups: dict[str, list[str]]
+) -> dict[str, dict[str, int | float]]:
+    """Считает упоминания групп в requirements и key_skills.
+
+    Args:
+        vacancies: выбранные вакансии.
+        groups: название группы → поисковые термины.
+
+    Returns:
+        Для каждой группы count и percent от общего числа вакансий.
+        Вакансия учитывается один раз в группе; группы могут пересекаться.
+    """
+    texts = [
+        f"{vacancy.get('requirements') or ''}\n{vacancy.get('key_skills') or ''}"
+        for vacancy in vacancies
+    ]
+    result = {}
+    for name, keywords in groups.items():
+        pattern = _skills_pattern(keywords)
+        count = sum(bool(pattern.search(text)) for text in texts) if pattern else 0
+        result[name] = {
+            "count": count,
+            "percent": round(100 * count / len(vacancies), 2) if vacancies else 0.0,
+        }
+    return result
 
 
 def get_top_key_skills(vacancies: list[dict], top_n: int = 10) -> list[tuple[str, int]]:

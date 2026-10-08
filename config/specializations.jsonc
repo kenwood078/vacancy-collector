@@ -1,0 +1,33 @@
+{
+  "network_engineer": {
+    "display_name": "Сетевые инженеры и архитекторы",
+    "query_hh": "(\"Сетевой инженер\" OR \"Network Engineer\" OR \"Сетевой архитектор\" OR \"Network Architect\" OR \"Сетевой администратор\" OR \"NetOps\" OR \"Инженер по сетевой безопасности\" OR \"Инженер сетевой безопасности\")",
+    "professional_role": 112,
+    "area": [1, 2],
+    "experience": ["between1And3", "between3And6", "moreThan6"],
+    "work_format": ["REMOTE", "HYBRID"],
+    "excluded_text": "стажер junior помощник техподдержка support",
+    "search_period": 30
+  },
+  "devops_sre": {
+    "display_name": "DevOps и SRE",
+    "query_hh": "(\"DevOps\" OR \"SRE\" OR \"Site Reliability Engineer\" OR \"Site Reliability Engineering\")",
+    // SRE с другой ролью HH не входит в эту выборку.
+    "professional_role": 160,
+    "area": [1, 2],
+    "experience": ["between1And3", "between3And6", "moreThan6"],
+    "work_format": ["REMOTE", "HYBRID"],
+    "excluded_text": "стажер junior помощник техподдержка support",
+    "search_period": 30
+  },
+  "security": {
+    "display_name": "Информационная безопасность",
+    "query_hh": "(\"Информационная безопасность\" OR \"Информационной безопасности\" OR \"Information Security\" OR \"Cybersecurity\" OR \"Security Engineer\")",
+    "professional_role": 116,
+    "area": [1, 2],
+    "experience": ["between1And3", "between3And6", "moreThan6"],
+    "work_format": ["REMOTE", "HYBRID"],
+    "excluded_text": "стажер junior помощник техподдержка support",
+    "search_period": 30
+  }
+}
