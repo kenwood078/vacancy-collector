@@ -616,6 +616,22 @@ class VacancyStorage:
                 cur.execute(query)
             return cur.fetchall()
 
+    def get_by_professional_role(self, professional_role: int) -> list[dict]:
+        """Возвращает все вакансии выбранной роли HH в порядке id DESC.
+
+        Args:
+            professional_role: целочисленный код профессиональной роли HH.
+
+        Returns:
+            Вакансии с точным совпадением роли, без записей с NULL.
+        """
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM vacancies WHERE professional_role = %s ORDER BY id DESC",
+                (professional_role,),
+            )
+            return cur.fetchall()
+
     def get_by_name(self, patterns: list[str], limit: int | None = None) -> list[dict]:
         """Возвращает вакансии, у которых в name встречается любой из patterns
         (регистронезависимо, ILIKE).

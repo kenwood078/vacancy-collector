@@ -6,6 +6,7 @@ from pathlib import Path
 
 import json5
 from crewai import LLM, Agent, Crew, Process, Task
+from crewai.tools import BaseTool
 from dotenv import load_dotenv
 
 from src.analytics.llm_extractor import VacancyExtractor
@@ -15,6 +16,11 @@ from src.matching.embedding_text import build_resume_text, build_vacancy_text
 from src.matching.match_report import build_match_report
 from src.matching.matcher import match_resume
 from src.matching.resume_parser import parse_resume
+from src.specializations import (
+    SpecializationConfigError,
+    load_report_profile,
+    load_specialization,
+)
 from src.storage import VacancyStorage
 from src.tools.stats_tool import GetStatsTool
 
@@ -34,12 +40,6 @@ LLM_API_KEY = os.getenv("LLM_API_KEY", "not-needed")
 QUERY_SERPER = """
 site:hh.ru/vacancy (intitle:"Network Engineer" OR intitle:"Сетевой инженер" OR intitle:"Network Architect" OR intitle:"Сетевой архитектор" OR intitle:"Сетевой администратор") (Москва OR "Санкт-Петербург") -архив -архиве -стажер -стажёр -junior -помощник -техподдержка -support
 """
-
-QUERY_HH = '("Сетевой инженер" OR "Network Engineer" OR "Сетевой архитектор" OR "Network Architect" OR "Сетевой администратор" OR "NetOps" OR "Инженер по сетевой безопасности" OR "Инженер сетевой безопасности")'
-
-AVAILABLE_TOOLS = {
-    "GetStatsTool": GetStatsTool(),
-}
 
 
 def setup_logging() -> None:
@@ -102,17 +102,24 @@ def load_crew_config() -> dict:
         return json5.loads(f.read())
 
 
-def build_agent(config: dict) -> Agent:
+def build_agent(
+    config: dict, available_tools: dict[str, BaseTool] | None = None
+) -> Agent:
     """Создаёт CrewAI-агента по конфигу (tools, role, goal, backstory).
 
     Args:
         config: конфигурация агента.
+        available_tools: инструменты текущего запуска; None создаёт новые экземпляры.
 
     Returns:
         Агент с параметрами и инструментами из конфигурации.
     """
+    if available_tools is None:
+        available_tools = {"GetStatsTool": GetStatsTool()}
     tools = [
-        AVAILABLE_TOOLS[t] for t in config.get("tools", []) if t in AVAILABLE_TOOLS
+        available_tools[name]
+        for name in config.get("tools", [])
+        if name in available_tools
     ]
     settings = config.get("settings", {})
     return Agent(
@@ -143,25 +150,27 @@ def cmd_collect_serper(n: int, no_cache: bool = False) -> None:
     print(f"\nСобрано: {added}, ошибок: {errors}, попыток: {attempts}")
 
 
-def cmd_collect_hh(n: int) -> None:
-    """Сбор n вакансий напрямую с hh.ru.
+def cmd_collect_hh(n: int, spec: str) -> None:
+    """Собирает n вакансий выбранной специализации напрямую с hh.ru.
 
     Args:
         n: число новых вакансий для сбора.
+        spec: обязательный ключ специализации.
     """
+    config = load_specialization(spec)
     from src.collectors.pipeline import collect_hh
 
     added, errors, attempts = collect_hh(
         n_vacancies=n,
-        query=QUERY_HH,
-        area=[1, 2],
-        search_period=30,
+        query=config["query_hh"],
+        area=config["area"],
+        search_period=config["search_period"],
         search_field=["name"],
-        experience=["between1And3", "between3And6", "moreThan6"],
-        work_format=["REMOTE", "HYBRID"],
-        excluded_text="стажер junior помощник техподдержка support",
+        experience=config["experience"],
+        work_format=config["work_format"],
+        excluded_text=config["excluded_text"],
         only_with_salary=False,
-        professional_role=112,
+        professional_role=config["professional_role"],
     )
     print(f"\n[hh] Собрано: {added}, ошибок: {errors}, попыток: {attempts}")
 
@@ -200,7 +209,7 @@ def _build_tasks(crew_config: dict, agents: dict[str, Agent]) -> list[Task]:
 
 
 def _save_task_outputs(
-    tasks: list[Task], crew_config: dict, timestamp: str
+    tasks: list[Task], crew_config: dict, timestamp: str, spec: str
 ) -> list[str]:
     """Сохраняет непустые результаты задач и возвращает пути файлов.
 
@@ -208,6 +217,7 @@ def _save_task_outputs(
         tasks: задачи в порядке конфигурации.
         crew_config: конфигурация CrewAI.
         timestamp: метка времени для имён выходных файлов.
+        spec: специализация в имени отчёта.
 
     Returns:
         Пути сохранённых файлов в порядке задач.
@@ -219,9 +229,9 @@ def _save_task_outputs(
             continue
         task_name = crew_config["tasks"][i]["name"]
         filename = (
-            f"report_{timestamp}.md"
+            f"report_{spec}_{timestamp}.md"
             if task_name == "analysis_task"
-            else f"task_{i}_{timestamp}.txt"
+            else f"task_{spec}_{i}_{timestamp}.txt"
         )
         filepath = os.path.join(OUTPUTS_DIR, filename)
         os.makedirs(OUTPUTS_DIR, exist_ok=True)
@@ -233,14 +243,96 @@ def _save_task_outputs(
     return saved_files
 
 
-def cmd_report() -> None:
-    """Запускает Crew с writer-агентом и сохраняет отчёт в outputs/."""
+def _validate_report_setup(crew_config: dict, agent_configs: dict[str, dict]) -> None:
+    """Проверяет связи задач, агентов и инструмента статистики.
+
+    Args:
+        crew_config: конфигурация CrewAI с задачами выбранного профиля.
+        agent_configs: конфигурации агентов по именам.
+
+    Raises:
+        ValueError: задачи или агенты отсутствуют либо некорректно связаны.
+        KeyError: отсутствует обязательное поле или агент writer.
+    """
+    if not agent_configs or not crew_config["tasks"]:
+        raise ValueError("agents и tasks не должны быть пустыми")
+    for task in crew_config["tasks"]:
+        if not isinstance(task.get("name"), str) or not task["name"].strip():
+            raise ValueError("tasks.name должен быть непустой строкой")
+        if task["agent"] not in agent_configs:
+            raise ValueError(f"неизвестный агент задачи {task['name']!r}")
+    if "GetStatsTool" not in agent_configs["writer"].get("tools", []):
+        raise ValueError("writer.tools должен содержать GetStatsTool")
+
+
+def _load_report_configuration(
+    spec: str,
+) -> tuple[dict, dict, dict, dict[str, dict]]:
+    """Проверяет и объединяет конфигурации до подключения к сервисам.
+
+    Args:
+        spec: ключ специализации.
+
+    Returns:
+        Фильтры, профиль отчёта, конфигурация CrewAI и конфигурации агентов.
+
+    Raises:
+        SpecializationConfigError: конфигурация отчёта некорректна.
+    """
+    specialization = load_specialization(spec)
+    profile = load_report_profile(spec)
+    try:
+        crew_config = load_crew_config()
+        writer_profile = {
+            field: profile["writer"][field] for field in ("role", "goal", "backstory")
+        }
+        agent_configs = {
+            name: {**load_agent_config(name), **writer_profile}
+            for name in crew_config["agents"]
+        }
+        task_profile = {
+            field: profile["task"][field]
+            for field in ("description", "expected_output")
+        }
+        crew_config["tasks"] = [
+            {**task, **task_profile} for task in crew_config["tasks"]
+        ]
+        _validate_report_setup(crew_config, agent_configs)
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError) as exc:
+        raise SpecializationConfigError(
+            f"{CREW_CONFIG_PATH}, {AGENTS_DIR} [{spec}]: {exc}"
+        ) from exc
+    return specialization, profile, crew_config, agent_configs
+
+
+def cmd_report(spec: str) -> None:
+    """Готовит статистику специализации и запускает её writer-агента.
+
+    Args:
+        spec: обязательный ключ специализации.
+    """
+    specialization, profile, crew_config, agent_configs = _load_report_configuration(
+        spec
+    )
+    stats_tool = GetStatsTool(
+        specialization=spec,
+        display_name=specialization["display_name"],
+        professional_role=specialization["professional_role"],
+        skills_keywords=profile["skills_keywords"],
+        skill_groups=profile["skill_groups"],
+    )
+    if not stats_tool.prepare():
+        print(
+            f"Нет вакансий для специализации {spec} ({specialization['display_name']})."
+        )
+        return
+
     # Сохраняем локальное время и прежний формат даты.
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005
-    crew_config = load_crew_config()
-
+    available_tools = {"GetStatsTool": stats_tool}
     agents = {
-        name: build_agent(load_agent_config(name)) for name in crew_config["agents"]
+        name: build_agent(config, available_tools)
+        for name, config in agent_configs.items()
     }
 
     tasks = _build_tasks(crew_config, agents)
@@ -265,7 +357,7 @@ def cmd_report() -> None:
 
     logger.info("Usage metrics: %s", crew.usage_metrics)
 
-    saved_files = _save_task_outputs(tasks, crew_config, timestamp)
+    saved_files = _save_task_outputs(tasks, crew_config, timestamp, spec)
 
     print("\n" + "=" * 60)
     if saved_files:
@@ -492,44 +584,37 @@ def cmd_match(resume_id: int, top_n: int = 20) -> None:
     print(f"\nОтчёт: {path}")
 
 
-def cmd_all_serper(n: int, no_cache: bool = False) -> None:
-    """Сбор вакансий serper + генерация отчёта.
+def cmd_all_hh(n: int, spec: str) -> None:
+    """Собирает вакансии HH и строит отчёт той же специализации.
 
     Args:
         n: число новых вакансий для сбора.
-        no_cache: отключить чтение и запись кэша поиска.
+        spec: обязательный ключ специализации.
     """
-    cmd_collect_serper(n, no_cache=no_cache)
-    cmd_report()
-
-
-def cmd_all_hh(n: int) -> None:
-    """Сбор вакансий hh + генерация отчёта.
-
-    Args:
-        n: число новых вакансий для сбора.
-    """
-    cmd_collect_hh(n)
-    cmd_report()
+    _load_report_configuration(spec)
+    cmd_collect_hh(n, spec)
+    cmd_report(spec)
 
 
 def _build_parser() -> argparse.ArgumentParser:
     """Создаёт CLI-парсер с командами и их аргументами.
 
     Returns:
-        Парсер с прежними параметрами, defaults и текстами справки.
+        Парсер восьми команд с обязательной специализацией для HH и report.
     """
     parser = argparse.ArgumentParser(description="Collector & Reporter")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_hh = sub.add_parser("collect-hh", help="Сбор напрямую с hh.ru")
     p_hh.add_argument("--n", type=int, default=10)
+    _add_spec_argument(p_hh)
 
     p_serper = sub.add_parser("collect-serper", help="Сбор через Serper")
     p_serper.add_argument("--n", type=int, default=10)
     p_serper.add_argument("--no-cache", action="store_true")
 
-    sub.add_parser("report", help="Сгенерировать отчёт по данным из БД")
+    p_report = sub.add_parser("report", help="Отчёт по специализации из БД")
+    _add_spec_argument(p_report)
 
     p_analyze = sub.add_parser(
         "analyze",
@@ -554,12 +639,22 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_all_hh = sub.add_parser("all-hh", help="Сбор + отчет")
     p_all_hh.add_argument("--n", type=int, default=10)
-
-    p_all_serper = sub.add_parser("all-serper", help="Сбор + отчет")
-    p_all_serper.add_argument("--n", type=int, default=10)
-    p_all_serper.add_argument("--no-cache", action="store_true")
+    _add_spec_argument(p_all_hh)
 
     return parser
+
+
+def _add_spec_argument(parser: argparse.ArgumentParser) -> None:
+    """Добавляет обязательный ключ специализации без чтения конфига.
+
+    Args:
+        parser: парсер команды сбора или отчёта.
+    """
+    parser.add_argument(
+        "--spec",
+        required=True,
+        help="Специализация: network_engineer, devops_sre, security",
+    )
 
 
 def main() -> None:
@@ -568,24 +663,25 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
-    if args.command == "collect-serper":
-        cmd_collect_serper(args.n, no_cache=args.no_cache)
-    elif args.command == "collect-hh":
-        cmd_collect_hh(args.n)
-    elif args.command == "report":
-        cmd_report()
-    elif args.command == "analyze":
-        cmd_analyze(args.n)
-    elif args.command == "embed-vacancies":
-        cmd_embed_vacancies(args.n)
-    elif args.command == "save-resume":
-        cmd_save_resume(args.path)
-    elif args.command == "match":
-        cmd_match(args.resume_id, top_n=args.top)
-    elif args.command == "all-serper":
-        cmd_all_serper(args.n, no_cache=args.no_cache)
-    elif args.command == "all-hh":
-        cmd_all_hh(args.n)
+    try:
+        if args.command == "collect-serper":
+            cmd_collect_serper(args.n, no_cache=args.no_cache)
+        elif args.command == "collect-hh":
+            cmd_collect_hh(args.n, args.spec)
+        elif args.command == "report":
+            cmd_report(args.spec)
+        elif args.command == "analyze":
+            cmd_analyze(args.n)
+        elif args.command == "embed-vacancies":
+            cmd_embed_vacancies(args.n)
+        elif args.command == "save-resume":
+            cmd_save_resume(args.path)
+        elif args.command == "match":
+            cmd_match(args.resume_id, top_n=args.top)
+        elif args.command == "all-hh":
+            cmd_all_hh(args.n, args.spec)
+    except SpecializationConfigError as exc:
+        parser.error(str(exc))
 
 
 if __name__ == "__main__":

@@ -45,26 +45,33 @@ python -c "from src.storage import VacancyStorage; VacancyStorage().close()"
 ## Architecture and public interfaces
 
 - `src/collectors/`: HHClient, SerperClient, scraper, extractor, pipeline.
-- `src/analytics/`: VacancyExtractor, ResumeExtractor, stats, skills_keywords;
+- `src/analytics/`: VacancyExtractor, ResumeExtractor, stats;
   `_extraction_utils.py` содержит общую очистку ответов LLM.
 - `src/storage/`: VacancyStorage и файловый SearchCache.
 - `src/matching/`: QwenEmbedder, embedding_text, matcher, match_report, resume_parser.
 - `src/tools/stats_tool.py`: CrewAI-инструмент GetStatsTool.
-- `main.py`: CLI и запуск CrewAI writer.
+- `src/specializations.py`: валидация JSONC-фильтров и профилей отчёта.
+- `config/specializations.jsonc`: фильтры HH по ключу специализации.
+- `config/report_profiles/`: профиль writer, инструкция и словари отчёта.
+- `main.py`: восемь CLI-команд и запуск CrewAI writer.
 
 Поток: collect → analyze → embed-vacancies → match.
 Резюме: parse_resume → ResumeExtractor → embed_query → save_resume.
-`all-hh` и `all-serper` выполняют сбор и отчёт рынка, без анализа и эмбеддингов.
+`all-hh` выполняет сбор и отчёт одной специализации, без анализа и эмбеддингов.
+`all-serper` удалена; `collect-serper` остаётся отдельным сбором.
 
 При рефакторинге сохраняй публичные имена, параметры, defaults, результаты
 и поведение, если пользователь явно не запросил изменение:
 
 - CLI: `analyze`, `embed-vacancies`, `save-resume`, `match`, `collect-hh`,
-  `collect-serper`, `report`, `all-hh`, `all-serper`; аргументы и справка.
+  `collect-serper`, `report`, `all-hh`; аргументы и справка.
+  `collect-hh`, `all-hh`, `report` требуют `--spec` без default: network_engineer,
+  devops_sre или security. Командные функции также требуют spec.
 - Все публичные методы VacancyStorage, включая `add_vacancy`, `add_vacancies`,
   `save_analysis`, `save_embedding`, `save_resume`, `get_analyzed_ids`,
   `get_unanalyzed`, `get_unembedded`, `get_resume`, `find_top_vacancies`,
-  `get_all`, `get_by_name`, `get_by_url`, `get_by_date`, `exists`, `count`,
+  `get_all`, `get_by_professional_role`, `get_by_name`, `get_by_url`,
+  `get_by_date`, `exists`, `count`,
   `close`, `__enter__`, `__exit__`; реэкспорт из `src.storage`.
 - Функции `build_match_report`, `build_vacancy_text`, `build_resume_text`,
   `match_resume`, `parse_resume` и остальные публичные функции модулей.
@@ -125,6 +132,31 @@ python -c "from src.storage import VacancyStorage; VacancyStorage().close()"
 - Счётчик сохранённых эмбеддингов учитывает результат `save_embedding`.
 - `cmd_match` сохраняет один полный Markdown-отчёт после вывода вакансий,
   включая пустой результат. Каталог outputs создаётся при записи отчёта.
+
+## Specializations and reports
+
+- Специализация определяется существующим professional_role HH: network_engineer
+  → 112, devops_sre → 160, security → 116. Не добавляй колонку или миграцию
+  ради этих фильтров и не подменяй роль ответа HH выбранным пресетом.
+- Отчёт использует все сохранённые записи выбранной роли, включая старые.
+  search_period влияет только на сбор. Другие роли и NULL исключаются.
+  Serper не получает код роли; его записи без роли не входят в отчёты.
+- DevOps/SRE ограничен ролью 160; SRE с другой ролью HH не входит в выборку.
+- Конфиги загружаются только для соответствующих команд относительно проекта.
+  Ошибки полей и неизвестные ключи должны обнаруживаться до внешних вызовов.
+  all-hh проверяет также профиль отчёта до начала сбора.
+- GetStatsTool создаётся на каждый отчёт и закрепляет выборку до writer.
+  Аргументы инструмента не позволяют LLM менять роль или профиль.
+- Считай профильные группы по requirements и key_skills, один раз на вакансию
+  внутри группы. Группы пересекаются; процент — от числа выбранных вакансий.
+  Словарь skills_keywords хранится только в JSONC выбранного профиля
+  как непустой список строк; не используй общий изменяемый словарь.
+- Отчёт не требует analyze; числа вычисляет код. Упоминания терминов не являются
+  полной классификацией, а динамика рынка требует сравнения периодов.
+- Роль/goal/backstory и задачи берутся из config/report_profiles/<spec>.jsonc;
+  crew.jsonc сохраняет общие настройки CrewAI, agents/writer.jsonc — tools/settings.
+- Файл отчёта: outputs/report_<spec>_<timestamp>.md. Пустая выборка — сообщение,
+  без запуска LLM и создания отчёта. Matching остаётся по общей базе.
 
 ## Testing and workflow
 
