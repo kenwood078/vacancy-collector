@@ -8,6 +8,12 @@ import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extras import RealDictCursor
 
+from src.collectors.vacancy_status import (
+    ACTIVE_CHECK_INTERVAL,
+    UNKNOWN_RETRY_INTERVAL,
+    VALID_STATUSES,
+)
+
 logger = logging.getLogger(__name__)
 load_dotenv()
 
@@ -69,7 +75,10 @@ class VacancyStorage:
                     responses_count         INTEGER,
 
                     -- Наши метаданные
-                    collected_at            TEXT NOT NULL
+                    collected_at            TEXT NOT NULL,
+                    status                  TEXT NOT NULL DEFAULT 'unknown'
+                                            CHECK (status IN ('active', 'archived', 'unknown')),
+                    last_checked_at         TIMESTAMPTZ
                 );
             """)
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
@@ -146,18 +155,22 @@ class VacancyStorage:
 
         Args:
             vacancy: словарь с обязательными полями url, name, employer
-                     и опциональными city, salary и т.д.
+                     и опциональными city, salary и т.д. status по умолчанию
+                     unknown; last_checked_at — время проверки или None.
 
         Returns:
             True, если запись добавлена; False, если URL уже существует.
 
         Raises:
-            ValueError: если отсутствует или пустое одно из обязательных полей.
+            ValueError: если обязательное поле пустое или status недопустим.
         """
         required = ["url", "name", "employer"]
         for field in required:
             if not vacancy.get(field):
                 raise ValueError(f"Field '{field}' is required and cannot be empty")
+        status = vacancy.get("status", "unknown")
+        if status not in VALID_STATUSES:
+            raise ValueError(f"Unknown vacancy status: {status}")
 
         try:
             with self.conn.cursor() as cur:
@@ -170,7 +183,7 @@ class VacancyStorage:
                         requirements, key_skills,
                         experience, work_format, employment_form, schedule, professional_role,
                         published_at, responses_count,
-                        collected_at
+                        collected_at, status, last_checked_at
                     )
                     VALUES (
                         %s, %s, %s,
@@ -179,7 +192,7 @@ class VacancyStorage:
                         %s, %s,
                         %s, %s, %s, %s, %s,
                         %s, %s,
-                        %s
+                        %s, %s, %s
                     )
                     ON CONFLICT (url) DO NOTHING
                     """,
@@ -207,6 +220,8 @@ class VacancyStorage:
                         vacancy.get("responses_count"),
                         # Сохраняем локальное время и прежний формат даты.
                         datetime.now().isoformat(),  # noqa: DTZ005
+                        status,
+                        vacancy.get("last_checked_at"),
                     ),
                 )
                 self.conn.commit()
@@ -470,6 +485,73 @@ class VacancyStorage:
             cur.execute("SELECT * FROM resumes WHERE id = %s", (resume_id,))
             return cur.fetchone()
 
+    def update_vacancy_status(self, url: str, status: str) -> datetime | None:
+        """Сохраняет результат и время последней попытки проверки.
+
+        Args:
+            url: URL существующей вакансии.
+            status: active, archived или unknown.
+
+        Returns:
+            Сохранённое время проверки либо None, если вакансии нет.
+
+        Raises:
+            ValueError: если статус недопустим.
+        """
+        if status not in VALID_STATUSES:
+            raise ValueError(f"Unknown vacancy status: {status}")
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE vacancies
+                    SET status = %s, last_checked_at = clock_timestamp()
+                    WHERE url = %s
+                    RETURNING last_checked_at
+                    """,
+                    (status, url),
+                )
+                row = cur.fetchone()
+                self.conn.commit()
+                return row[0] if row is not None else None
+        except Exception:
+            self.conn.rollback()
+            raise
+
+    def get_due_for_status_check(self, limit: int = 20) -> list[dict]:
+        """Выбирает ограниченную порцию вакансий, которым нужна проверка.
+
+        Args:
+            limit: максимальное число записей, положительное целое.
+
+        Returns:
+            Непроверенные, затем давно проверенные active/unknown вакансии.
+
+        Raises:
+            ValueError: если limit неположительный.
+        """
+        if limit <= 0:
+            raise ValueError("Количество проверок должно быть положительным.")
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT id, url, status, last_checked_at
+                FROM vacancies
+                WHERE status IN ('active', 'unknown')
+                  AND (
+                    last_checked_at IS NULL
+                    OR (status = 'active'
+                        AND last_checked_at <= statement_timestamp() - %s)
+                    OR (status = 'unknown'
+                        AND last_checked_at <= statement_timestamp() - %s)
+                  )
+                ORDER BY last_checked_at ASC NULLS FIRST, id ASC
+                LIMIT %s
+                """,
+                (ACTIVE_CHECK_INTERVAL, UNKNOWN_RETRY_INTERVAL, limit),
+            )
+            return cur.fetchall()
+
     def find_top_vacancies(
         self,
         embedding: list[float],
@@ -490,13 +572,15 @@ class VacancyStorage:
         """
         vec_str = self._serialize_vector(embedding)
         where, params = self._build_match_filters(resume)
+        where.append("v.status IN ('active', 'unknown')")
 
         where_sql = " AND ".join(where)
 
         query = f"""
             SELECT
-                v.id, v.name, v.employer, v.city, v.salary,
-                v.experience, v.work_format, v.url,
+                v.id, v.name, v.employer, v.employer_rating, v.employer_reviews_count,
+                v.city, v.salary, v.experience, v.work_format, v.url,
+                v.status, v.last_checked_at,
                 a.stack, a.tasks, a.certifications, a.domains,
                 a.programming_languages, a.english_level,
                 ROUND((1 - (a.embedding <=> %s::vector))::numeric, 4) AS score

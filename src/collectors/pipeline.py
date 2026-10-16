@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from src.collectors.extractor import extract_vacancy
@@ -93,6 +94,8 @@ def collect_hh(
                     logger.info("Skip (empty name/employer): %s", v["vacancyId"])
                     continue
 
+                data["status"] = "active"
+                data["last_checked_at"] = datetime.now(timezone.utc)
                 if storage.add_vacancy(data):
                     added += 1
                     logger.info("[%s/%s] %s", added, n_vacancies, data["name"])
@@ -157,6 +160,7 @@ def collect_serper(
                 if not text:
                     errors += 1
                     continue
+                checked_at = datetime.now(timezone.utc)
 
                 data = extract_vacancy(text, url, llm)
                 if not data:
@@ -166,6 +170,8 @@ def collect_serper(
                 if "company" in data:
                     data["employer"] = data.pop("company")
 
+                data["status"] = "active"
+                data["last_checked_at"] = checked_at
                 if storage.add_vacancy(data):
                     added += 1
                     logger.info(

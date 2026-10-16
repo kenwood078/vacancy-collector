@@ -1,8 +1,10 @@
 import json
 import logging
+import math
 import os
 import time
 from typing import Any
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -31,6 +33,41 @@ CURRENCY_SYMBOLS = {
 
 
 _NOT_FOUND = object()
+
+
+def _parse_employer_reviews(reviews: Any) -> tuple[float | None, int | None]:
+    """Нормализует рейтинг и число отзывов из известного блока HH.
+
+    Args:
+        reviews: employerReviews из выдачи или ответа виджета.
+
+    Returns:
+        Рейтинг 0–5 и неотрицательное число отзывов; неверные поля заменены None.
+    """
+    if not isinstance(reviews, dict):
+        return None, None
+    rating = None
+    raw_rating = reviews.get("totalRating")
+    if isinstance(raw_rating, (str, int, float)) and not isinstance(raw_rating, bool):
+        try:
+            value = float(raw_rating)
+        except (ValueError, OverflowError):
+            pass
+        else:
+            if math.isfinite(value) and 0 <= value <= 5:
+                rating = value
+
+    count = None
+    raw_count = reviews.get("reviewsCount")
+    if isinstance(raw_count, (str, int)) and not isinstance(raw_count, bool):
+        try:
+            value = int(raw_count)
+        except ValueError:
+            pass
+        else:
+            if value >= 0:
+                count = value
+    return rating, count
 
 
 def _find_key(obj: Any, key: str) -> Any:
@@ -64,6 +101,7 @@ class HHClient:
     def __init__(self) -> None:
         """Создаёт requests.Session с cookies из .env."""
         self.session = requests.Session()
+        self._employer_reviews_cache: dict[str, tuple[float | None, int | None]] = {}
         self.session.cookies.set("hhtoken", HH_TOKEN, domain=".hh.ru")
         self.session.cookies.set("_xsrf", HH_XSRF, domain=".hh.ru")
         self.session.headers.update(
@@ -181,7 +219,7 @@ class HHClient:
 
     def _get_detail(self, vacancy_id: int) -> dict | None:
         """Парсит страницу вакансии и возвращает dict с полями:
-        description, key_skills, requirements_text.
+        description, key_skills, requirements_text, employer_reviews_url.
 
         Args:
             vacancy_id: ID вакансии.
@@ -220,11 +258,87 @@ class HHClient:
         if skills:
             requirements += "\n\nКлючевые навыки: " + ", ".join(skills)
 
+        micro_frontends = data.get("microFrontends")
+        widget = (
+            micro_frontends.get("employerReviewsSmall")
+            if isinstance(micro_frontends, dict)
+            else None
+        )
+        widget_url = widget.get("url") if isinstance(widget, dict) else None
+
         return {
             "description": desc_text,
             "key_skills": skills,
             "requirements_text": requirements,
+            "employer_reviews_url": widget_url,
         }
+
+    def _get_employer_reviews(
+        self, company: dict, detail: dict, vacancy_id: int
+    ) -> tuple[float | None, int | None]:
+        """Получает рейтинг из выдачи, кэша или отдельного блока страницы.
+
+        Args:
+            company: работодатель из поисковой выдачи.
+            detail: загруженные детали с необязательным URL виджета.
+            vacancy_id: ID вакансии для Referer запроса.
+
+        Returns:
+            Рейтинг и число отзывов; None для отсутствующих данных.
+        """
+        rating, count = _parse_employer_reviews(company.get("employerReviews"))
+        employer_id = company.get("id")
+        cache_key = str(employer_id) if employer_id is not None else None
+        if rating is not None:
+            if cache_key is not None:
+                self._employer_reviews_cache[cache_key] = rating, count
+            return rating, count
+        if cache_key is not None and cache_key in self._employer_reviews_cache:
+            cached_rating, cached_count = self._employer_reviews_cache[cache_key]
+            return cached_rating, count if count is not None else cached_count
+
+        widget_url = detail.get("employer_reviews_url")
+        if cache_key is None or not isinstance(widget_url, str) or not widget_url:
+            return None, count
+        try:
+            widget_url = urljoin(HH_BASE, widget_url)
+            parsed_url = urlparse(widget_url)
+        except ValueError:
+            logger.warning("Invalid employer reviews URL for %s", employer_id)
+            return None, count
+        if (
+            parsed_url.scheme != "https"
+            or parsed_url.netloc != urlparse(HH_BASE).netloc
+            or parsed_url.path != "/employer_reviews/proxy_components/small_widget"
+            or parse_qs(parsed_url.query).get("employerId") != [cache_key]
+        ):
+            logger.warning("Unexpected employer reviews URL for %s", employer_id)
+            return None, count
+
+        time.sleep(1.5)
+        try:
+            response = self.session.get(
+                widget_url,
+                timeout=TIMEOUT,
+                headers={
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Accept": "application/json",
+                    "Referer": f"{HH_BASE}/vacancy/{vacancy_id}",
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            reviews = (
+                payload.get("employerReviews") if isinstance(payload, dict) else None
+            )
+            rating, widget_count = _parse_employer_reviews(reviews)
+            if count is None:
+                count = widget_count
+        except (requests.RequestException, ValueError) as exc:
+            logger.warning("Employer reviews failed for %s: %s", employer_id, exc)
+
+        self._employer_reviews_cache[cache_key] = rating, count
+        return rating, count
 
     @staticmethod
     def _parse_salary(compensation: dict) -> str | None:
@@ -334,9 +448,9 @@ class HHClient:
         professional_role = self._parse_professional_role(vacancy)
 
         company = vacancy.get("company") or {}
-        reviews = company.get("employerReviews") or {}
-        employer_rating = reviews.get("totalRating")
-        employer_reviews_count = reviews.get("reviewsCount")
+        employer_rating, employer_reviews_count = self._get_employer_reviews(
+            company, detail, vacancy["vacancyId"]
+        )
 
         skills = detail.get("key_skills") or []
 

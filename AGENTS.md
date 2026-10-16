@@ -44,7 +44,8 @@ python -c "from src.storage import VacancyStorage; VacancyStorage().close()"
 
 ## Architecture and public interfaces
 
-- `src/collectors/`: HHClient, SerperClient, scraper, extractor, pipeline.
+- `src/collectors/`: HHClient, SerperClient, scraper, extractor, pipeline,
+  vacancy_status (проверка актуальности через HH cookies).
 - `src/analytics/`: VacancyExtractor, ResumeExtractor, stats;
   `_extraction_utils.py` содержит общую очистку ответов LLM.
 - `src/storage/`: VacancyStorage и файловый SearchCache.
@@ -53,7 +54,7 @@ python -c "from src.storage import VacancyStorage; VacancyStorage().close()"
 - `src/specializations.py`: валидация JSONC-фильтров и профилей отчёта.
 - `config/specializations.jsonc`: фильтры HH по ключу специализации.
 - `config/report_profiles/`: профиль writer, инструкция и словари отчёта.
-- `main.py`: восемь CLI-команд и запуск CrewAI writer.
+- `main.py`: девять CLI-команд и запуск CrewAI writer.
 
 Поток: collect → analyze → embed-vacancies → match.
 Резюме: parse_resume → ResumeExtractor → embed_query → save_resume.
@@ -64,7 +65,7 @@ python -c "from src.storage import VacancyStorage; VacancyStorage().close()"
 и поведение, если пользователь явно не запросил изменение:
 
 - CLI: `analyze`, `embed-vacancies`, `save-resume`, `match`, `collect-hh`,
-  `collect-serper`, `report`, `all-hh`; аргументы и справка.
+  `collect-serper`, `report`, `all-hh`, `check-status`; аргументы и справка.
   `collect-hh`, `all-hh`, `report` требуют `--spec` без default: network_engineer,
   devops_sre или security. Командные функции также требуют spec.
 - Все публичные методы VacancyStorage, включая `add_vacancy`, `add_vacancies`,
@@ -72,6 +73,7 @@ python -c "from src.storage import VacancyStorage; VacancyStorage().close()"
   `get_unanalyzed`, `get_unembedded`, `get_resume`, `find_top_vacancies`,
   `get_all`, `get_by_professional_role`, `get_by_name`, `get_by_url`,
   `get_by_date`, `exists`, `count`,
+  `update_vacancy_status`, `get_due_for_status_check`,
   `close`, `__enter__`, `__exit__`; реэкспорт из `src.storage`.
 - Функции `build_match_report`, `build_vacancy_text`, `build_resume_text`,
   `match_resume`, `parse_resume` и остальные публичные функции модулей.
@@ -93,7 +95,8 @@ python -c "from src.storage import VacancyStorage; VacancyStorage().close()"
   и повторное выбрасывание исключения. Не переноси транзакции между слоями
   и не добавляй повторные попытки без явной задачи.
 - Локальные импорты допустимы для циклов и отложенной загрузки зависимости:
-  HHClient импортируется внутри `collect_hh`, чтобы Serper не требовал HH cookies.
+  HHClient импортируется внутри `collect_hh` и `create_status_session`,
+  чтобы Serper, анализ и справка CLI не требовали HH cookies.
 
 ## LLM and embeddings
 
@@ -115,6 +118,22 @@ python -c "from src.storage import VacancyStorage; VacancyStorage().close()"
 
 ## Database and output invariants
 
+- `vacancies.status`: active / archived / unknown; default unknown.
+  `last_checked_at`: TIMESTAMPTZ, время последней попытки проверки; default NULL.
+  При успешном сборе новых вакансий сохраняются active и дата загрузки,
+  без отдельного запроса для определения статуса.
+  Повторные проверки только при match и check-status,
+  через HH_TOKEN и HH_XSRF.
+  При сборе существующие URL пропускаются, статус и время не обновляются.
+  active перепроверяется через 7 дней, unknown через сутки, NULL — сразу.
+  archived сохраняются, но исключаются из матчинга и повторных проверок.
+  match добирает кандидатов до top_n или исчерпания выборки, без лимита 2×top_n;
+  check-status --n (default 20) обрабатывает одну ограниченную порцию.
+- Рейтинг и число отзывов при новом сборе HH: поисковая выдача → кэш по ID
+  работодателя на время HHClient → блок employerReviewsSmall из загруженной
+  страницы. Не более одной дополнительной попытки на работодателя за запуск,
+  включая неудачную; ошибка виджета не прерывает сбор. Данные сохраняются в
+  employer_rating и employer_reviews_count; старые строки не дозаполняются.
 - Таблицы: `vacancies`, `vacancy_analysis`, `resumes`.
   Точная схема — в `VacancyStorage._create_table`.
 - Конструктор создаёт недостающие таблицы, расширение vector и индексы.
@@ -132,6 +151,9 @@ python -c "from src.storage import VacancyStorage; VacancyStorage().close()"
 - Счётчик сохранённых эмбеддингов учитывает результат `save_embedding`.
 - `cmd_match` сохраняет один полный Markdown-отчёт после вывода вакансий,
   включая пустой результат. Каталог outputs создаётся при записи отчёта.
+  Названия в таблице — ссылки; рейтинг и известное число отзывов показаны
+  рядом с работодателем. Сортировка остаётся по векторному сходству с резюме,
+  независимо от рейтинга работодателя. Неподтверждённая актуальность помечается.
 
 ## Specializations and reports
 
@@ -162,8 +184,10 @@ python -c "from src.storage import VacancyStorage; VacancyStorage().close()"
 
 - `tests/debug_*.py` — ручные проверки; они могут обращаться к БД, LLM,
   внешним API и записывать файлы. Не запускай их все автоматически.
-- Сейчас pytest-тестов нет. При их появлении запускай подходящие к изменению
-  тесты; новые тесты размещай в `tests/test_*.py`, учитывая ограничения задачи.
+- Автоматические unittest-тесты: `python -m unittest discover -s tests -p 'test_*.py'`.
+  Запускай подходящие к изменению тесты; новые размещай в `tests/test_*.py`.
+  Проверки с реальной БД запускаются только с явно заданным
+  `VACANCY_STATUS_TEST_DSN` и используют отдельную временную схему.
 - В первую очередь проверяй чистые функции очистки, валидации, зарплат,
   embedding-текстов и пересечений. Для исправлений проверяй ошибку и восстановление,
   а для CLI — параметры, счётчики и записанные отчёты.

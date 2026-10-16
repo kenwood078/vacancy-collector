@@ -11,9 +11,10 @@ from dotenv import load_dotenv
 
 from src.analytics.llm_extractor import VacancyExtractor
 from src.analytics.resume_extractor import ResumeExtractor
+from src.collectors.vacancy_status import StatusCheckConfigError, check_vacancy_statuses
 from src.matching.embedder import QwenEmbedder
 from src.matching.embedding_text import build_resume_text, build_vacancy_text
-from src.matching.match_report import build_match_report
+from src.matching.match_report import build_match_report, format_vacancy_status
 from src.matching.matcher import match_resume
 from src.matching.resume_parser import parse_resume
 from src.specializations import (
@@ -551,6 +552,7 @@ def _print_match(i: int, m: dict) -> None:
     print(f"    Зарплата: {salary} · Английский: {english}")
     print(f"    Домены: {domains}")
     print(f"    Сертификации: {certs} · Языки: {langs}")
+    print(f"    {format_vacancy_status(m)}")
     print(f"    {url}")
     print()
 
@@ -584,6 +586,24 @@ def cmd_match(resume_id: int, top_n: int = 20) -> None:
     print(f"\nОтчёт: {path}")
 
 
+def cmd_check_status(n: int = 20) -> None:
+    """Проверяет ограниченную порцию просроченных вакансий.
+
+    Args:
+        n: максимальное число проверок.
+    """
+    counts = check_vacancy_statuses(n=n)
+    total = sum(counts.values())
+    if total == 0:
+        print("Нет вакансий, которым нужна проверка актуальности.")
+        return
+    print(
+        f"Проверено: {total}; активных: {counts['active']}; "
+        f"архивных: {counts['archived']}; "
+        f"актуальность не подтверждена: {counts['unknown']}"
+    )
+
+
 def cmd_all_hh(n: int, spec: str) -> None:
     """Собирает вакансии HH и строит отчёт той же специализации.
 
@@ -600,7 +620,7 @@ def _build_parser() -> argparse.ArgumentParser:
     """Создаёт CLI-парсер с командами и их аргументами.
 
     Returns:
-        Парсер восьми команд с обязательной специализацией для HH и report.
+        Парсер девяти команд с обязательной специализацией для HH и report.
     """
     parser = argparse.ArgumentParser(description="Collector & Reporter")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -637,11 +657,42 @@ def _build_parser() -> argparse.ArgumentParser:
     p_match.add_argument("--resume-id", type=int, required=True)
     p_match.add_argument("--top", type=int, default=20)
 
+    p_status = sub.add_parser("check-status", help="Проверить актуальность вакансий")
+    p_status.add_argument(
+        "--n",
+        type=_positive_int,
+        default=20,
+        help="Максимум проверок просроченных вакансий (по умолчанию 20)",
+    )
+
     p_all_hh = sub.add_parser("all-hh", help="Сбор + отчет")
     p_all_hh.add_argument("--n", type=int, default=10)
     _add_spec_argument(p_all_hh)
 
     return parser
+
+
+def _positive_int(value: str) -> int:
+    """Разбирает положительное целое для ограничения проверки статусов.
+
+    Args:
+        value: значение аргумента CLI.
+
+    Returns:
+        Положительное целое число.
+
+    Raises:
+        argparse.ArgumentTypeError: если значение не является положительным целым.
+    """
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "Ожидается положительное целое число."
+        ) from exc
+    if number <= 0:
+        raise argparse.ArgumentTypeError("Ожидается положительное целое число.")
+    return number
 
 
 def _add_spec_argument(parser: argparse.ArgumentParser) -> None:
@@ -678,9 +729,13 @@ def main() -> None:
             cmd_save_resume(args.path)
         elif args.command == "match":
             cmd_match(args.resume_id, top_n=args.top)
+        elif args.command == "check-status":
+            cmd_check_status(args.n)
         elif args.command == "all-hh":
             cmd_all_hh(args.n, args.spec)
     except SpecializationConfigError as exc:
+        parser.error(str(exc))
+    except StatusCheckConfigError as exc:
         parser.error(str(exc))
 
 

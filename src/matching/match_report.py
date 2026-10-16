@@ -3,6 +3,24 @@
 from datetime import datetime
 
 
+def format_vacancy_status(vacancy: dict) -> str:
+    """Форматирует актуальность и время проверки для отчёта и CLI.
+
+    Args:
+        vacancy: запись с необязательными status и last_checked_at.
+
+    Returns:
+        Подпись статуса с датой либо отметкой об отсутствии проверки.
+    """
+    label = {
+        "active": "Активна",
+        "archived": "В архиве",
+    }.get(vacancy.get("status"), "Актуальность не подтверждена")
+    checked_at = vacancy.get("last_checked_at")
+    date = checked_at.strftime("%Y-%m-%d %H:%M %z") if checked_at else "не выполнялась"
+    return f"{label}; проверка: {date}"
+
+
 def _fmt_list(items: list[str] | None, empty: str = "—") -> str:
     """Склеивает список через запятую; пустое → '—'.
 
@@ -122,22 +140,31 @@ def _build_matches_table(matches: list[dict]) -> list[str]:
         Строки Markdown-таблицы, включая заголовок.
     """
     lines = [
-        "| # | Score | Название | Работодатель | Город | Формат | Опыт | Зарплата | Ссылка |",
-        "|---|-------|----------|--------------|-------|--------|------|----------|--------|",
+        "| # | Score | Название | Работодатель · рейтинг | Город | Формат | Опыт | Зарплата | Актуальность |",
+        "|---|-------|----------|------------------------|-------|--------|------|----------|--------------|",
     ]
     for i, m in enumerate(matches, start=1):
         name = (m.get("name") or "—").replace("|", "\\|")
         employer = (m.get("employer") or "—").replace("|", "\\|")
+        employer_rating = m.get("employer_rating")
+        rating = f"★ {employer_rating:.1f}" if employer_rating is not None else "—"
+        reviews_count = m.get("employer_reviews_count")
+        if reviews_count is not None:
+            rating += f" ({reviews_count} отзывов)"
+        employer = f"{employer} · {rating}"
         city = m.get("city") or "—"
         wf = m.get("work_format") or "—"
         exp = m.get("experience") or "—"
         salary = (m.get("salary") or "—").replace("|", "\\|")
         url = m.get("url") or ""
-        url_md = f"[открыть]({url})" if url else "—"
+        if url:
+            name = name.replace("[", "\\[").replace("]", "\\]")
+            name = f"[{name}]({url})"
+        status = format_vacancy_status(m)
 
         lines.append(
             f"| {i} | {m['score']} | {name} | {employer} | {city} | "
-            f"{wf} | {exp} | {salary} | {url_md} |"
+            f"{wf} | {exp} | {salary} | {status} |"
         )
     return lines
 
@@ -175,6 +202,7 @@ def _build_top3_breakdown(
         lines.append("")
         if url:
             lines.append(f"- **Ссылка:** {url}")
+        lines.append(f"- **Актуальность:** {format_vacancy_status(m)}")
         lines.append(f"- **Опыт:** {m.get('experience') or '—'}")
         lines.append(f"- **Формат:** {m.get('work_format') or '—'}")
         lines.append(f"- **Зарплата:** {m.get('salary') or '—'}")
