@@ -11,6 +11,7 @@ import main
 from src.collectors.vacancy_status import StatusCheckConfigError
 from src.matching.match_report import build_match_report
 from src.matching.matcher import match_resume
+from src.storage import VacancyStorage
 
 NOW = datetime.now(timezone.utc)
 
@@ -67,6 +68,82 @@ class StatusMatchingTests(unittest.TestCase):
             )
         )
         self.assertTrue(all(m["last_checked_at"] == NOW for m in matches))
+
+    def test_python_filters_and_archive_refill_together(self) -> None:
+        """Реальные фильтры добирают топ после неподходящих записей и архива."""
+        rows = [
+            {
+                "id": i,
+                "url": str(i),
+                "work_format": "ON_SITE" if i < 200 else "REMOTE",
+                "city": "Москва",
+                "salary_to": 200_000,
+                "salary_currency": "RUR",
+                "salary": "до 200000 ₽ в месяц",
+                "status": "unknown",
+                "last_checked_at": None,
+                "score": 1 - i / 1000,
+                "_match_distance": i / 1000,
+            }
+            for i in range(205)
+        ]
+        rows[201].update(salary_to=2_000, salary_currency="USD")
+        rows[202].update(salary_to=1_000, salary="до 1000 ₽ в час")
+        rows[203].update(salary_to=50_000, salary="до 50000 ₽ в месяц")
+        storage = object.__new__(VacancyStorage)
+        storage.conn = MagicMock()
+        cursor = storage.conn.cursor.return_value.__enter__.return_value
+
+        def execute(query: str, params: list) -> None:
+            """SQL-страницы продолжаются по позиции, исключая сохранённый архив."""
+            self.assertIn("LIMIT %s", query)
+            self.assertEqual(params[-1], 100)
+            eligible = [row for row in rows if row["status"] != "archived"]
+            if "> (%s, %s)" in query:
+                after = tuple(params[-4:-2])
+                eligible = [
+                    row
+                    for row in eligible
+                    if (row["_match_distance"], row["id"]) > after
+                ]
+            cursor.fetchall.return_value = [dict(row) for row in eligible[: params[-1]]]
+
+        def save(url: str, status: str) -> datetime:
+            """Запоминает архив для следующего запроса поиска."""
+            rows[int(url)].update(status=status, last_checked_at=NOW)
+            return NOW
+
+        cursor.execute.side_effect = execute
+        resume = {
+            "id": 5,
+            "embedding": [0.1, 0.2],
+            "work_format": "REMOTE,HYBRID",
+            "city": "Казань",
+            "salary_min": 100_000,
+            "salary_expectation": "от 100000 ₽",
+        }
+        with (
+            patch("src.matching.matcher.VacancyStorage") as factory,
+            patch.object(storage, "get_resume", return_value=resume),
+            patch.object(storage, "update_vacancy_status", side_effect=save),
+            patch("src.matching.matcher.create_status_session"),
+            patch("src.matching.matcher.time.sleep"),
+            patch(
+                "src.matching.matcher.check_vacancy_status",
+                side_effect=lambda url, session: (
+                    "archived" if url == "200" else "active"
+                ),
+            ) as check,
+        ):
+            factory.return_value.__enter__.return_value = storage
+            _, matches = match_resume(5, top_n=3)
+        self.assertEqual([m["id"] for m in matches], [201, 202, 204])
+        self.assertEqual(
+            [call.args[0] for call in check.call_args_list],
+            ["200", "201", "202", "204"],
+        )
+        self.assertEqual(cursor.execute.call_count, 6)
+        self.assertTrue(all("_match_distance" not in row for row in matches))
 
     def test_exhaustion_and_fresh_candidates(self) -> None:
         """Возвращается неполный топ без запроса свежих записей."""

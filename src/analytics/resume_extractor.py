@@ -203,7 +203,7 @@ class ResumeExtractor:
             return None
         if isinstance(value, bool):
             return None
-        if isinstance(value, (int, float)) and value > 0:
+        if isinstance(value, (int, float)) and value >= 0:
             return int(value)
         return None
 
@@ -270,9 +270,9 @@ class ResumeExtractor:
         else:
             wf = ",".join(dict.fromkeys(wf_parts))
 
-        years = ResumeExtractor._to_year(
-            result.get("experience_years_stated")
-        ) or ResumeExtractor._to_year(result.get("experience_years_calculated"))
+        years = ResumeExtractor._to_year(result.get("experience_years_stated"))
+        if years is None:
+            years = ResumeExtractor._to_year(result.get("experience_years_calculated"))
 
         salary_text = result.get("salary_expectation")
         salary_text = str(salary_text).strip() if salary_text else None

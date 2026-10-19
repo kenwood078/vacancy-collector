@@ -21,9 +21,10 @@ class StatusStorageTests(unittest.TestCase):
         self.storage = object.__new__(VacancyStorage)
         self.storage.conn = MagicMock()
         self.cursor = self.storage.conn.cursor.return_value.__enter__.return_value
+        self.cursor.fetchall.return_value = []
 
     def test_match_sql_preserves_filters_and_parameters(self) -> None:
-        """Опыт, зарплата и город объединены со статусом через AND."""
+        """SQL сохраняет опыт и статус; зарплата и город проверяются в Python."""
         resume = {
             "experience_years": 5,
             "salary_min": 100_000,
@@ -32,32 +33,43 @@ class StatusStorageTests(unittest.TestCase):
         }
         self.storage.find_top_vacancies([0.1, 0.2], resume, top_n=7)
         query, params = self.cursor.execute.call_args.args
-        self.assertIn("a.embedding IS NOT NULL AND v.experience = ANY(%s)", query)
-        self.assertIn("AND (v.salary_to IS NULL OR v.salary_to >= %s)", query)
-        self.assertIn("AND (v.city = %s OR v.work_format ILIKE '%%REMOTE%%')", query)
+        self.assertIn(
+            "a.embedding IS NOT NULL AND (v.experience = ANY(%s) OR v.experience IS NULL)",
+            query,
+        )
+        self.assertNotIn("v.salary_to >= %s", query)
+        self.assertNotIn("v.city = %s", query)
         self.assertIn("AND v.status IN ('active', 'unknown')", query)
         self.assertIn("v.status, v.last_checked_at", query)
+        self.assertIn("v.salary_to, v.salary_currency", query)
         self.assertIn("ORDER BY a.embedding <=> %s::vector", query)
+        self.assertIn("LIMIT %s", query)
         self.assertEqual(
             params,
             [
                 "[0.1,0.2]",
-                ["between1And3", "between3And6"],
-                100_000,
-                "Москва",
                 "[0.1,0.2]",
-                7,
+                ["between1And3", "between3And6"],
+                "[0.1,0.2]",
+                100,
             ],
         )
 
     def test_match_with_missing_resume_filters(self) -> None:
         """Статус применяется и без дополнительных параметров резюме."""
-        self.storage.find_top_vacancies([0.1], {}, top_n=0)
+        self.storage.find_top_vacancies([0.1], {}, top_n=1)
         query, params = self.cursor.execute.call_args.args
         self.assertIn(
             "WHERE a.embedding IS NOT NULL AND v.status IN ('active', 'unknown')", query
         )
-        self.assertEqual(params, ["[0.1]", "[0.1]", 0])
+        self.assertEqual(params, ["[0.1]", "[0.1]", "[0.1]", 100])
+
+    def test_zero_and_negative_top_do_not_query(self) -> None:
+        """Пустой топ не читает БД; отрицательный предел отвергается."""
+        self.assertEqual(self.storage.find_top_vacancies([0.1], {}, top_n=0), [])
+        with self.assertRaises(ValueError):
+            self.storage.find_top_vacancies([0.1], {}, top_n=-1)
+        self.cursor.execute.assert_not_called()
 
     def test_due_sql_has_intervals_order_and_limit(self) -> None:
         """Архив исключён; непроверенные идут первыми, выборка ограничена."""
@@ -242,6 +254,43 @@ class StatusStorageDatabaseTests(unittest.TestCase):
             ),
             ("remote", "unknown", "1 hour", "Казань", None, "between3And6", "REMOTE"),
             (
+                "unspecified_experience",
+                "unknown",
+                "1 hour",
+                "Москва",
+                200_000,
+                None,
+                None,
+            ),
+            (
+                "office",
+                "unknown",
+                "1 hour",
+                "Москва",
+                200_000,
+                "between3And6",
+                "ON_SITE",
+            ),
+            (
+                "other_currency",
+                "unknown",
+                "1 hour",
+                "Москва",
+                2_000,
+                "between3And6",
+                None,
+            ),
+            ("hourly", "unknown", "1 hour", "Москва", 1_000, "between3And6", None),
+            (
+                "unknown_currency",
+                "unknown",
+                "1 hour",
+                "Москва",
+                1_000,
+                "between3And6",
+                None,
+            ),
+            (
                 "wrong_experience",
                 "unknown",
                 "1 hour",
@@ -259,6 +308,18 @@ class StatusStorageDatabaseTests(unittest.TestCase):
                     "employer": "Компания",
                     "city": city,
                     "salary_to": salary,
+                    "salary_currency": (
+                        None
+                        if url == "unknown_currency"
+                        else "USD"
+                        if url == "other_currency"
+                        else "RUR"
+                    ),
+                    "salary": (
+                        f"до {salary} в час"
+                        if url == "hourly"
+                        else f"до {salary} в месяц"
+                    ),
                     "experience": experience,
                     "work_format": work_format,
                 }
@@ -284,7 +345,14 @@ class StatusStorageDatabaseTests(unittest.TestCase):
             ["never"],
         )
         matches = self.storage.find_top_vacancies(
-            vector, {"experience_years": 5, "salary_min": 100_000, "city": "Москва"}
+            vector,
+            {
+                "experience_years": 5,
+                "salary_min": 100_000,
+                "salary_expectation": "от 100000 ₽",
+                "work_format": "REMOTE,HYBRID",
+                "city": "Москва",
+            },
         )
         self.assertEqual(
             {v["url"] for v in matches},
@@ -295,6 +363,10 @@ class StatusStorageDatabaseTests(unittest.TestCase):
                 "active_fresh",
                 "unknown_fresh",
                 "remote",
+                "unspecified_experience",
+                "other_currency",
+                "hourly",
+                "unknown_currency",
             },
         )
         checked_at = self.storage.update_vacancy_status("never", "archived")
@@ -303,6 +375,42 @@ class StatusStorageDatabaseTests(unittest.TestCase):
             "never", {v["url"] for v in self.storage.find_top_vacancies(vector, {})}
         )
         self.assertEqual(self.storage.get_by_url("never")["name"], "Инженер")
+
+    def test_real_match_pagination_with_equal_distances(self) -> None:
+        """SQL-страницы пересекают одинаковые расстояния без пропусков по ID."""
+        self.storage._create_table()
+        vector = [1.0] + [0.0] * 2559
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO vacancies (
+                    url, name, employer, work_format, collected_at, status
+                )
+                SELECT
+                    'page-' || n, 'Инженер', 'Компания',
+                    CASE WHEN n <= 200 THEN 'ON_SITE' ELSE 'REMOTE' END,
+                    '2026-10-19', 'active'
+                FROM generate_series(1, 205) AS series(n)
+            """)
+            cur.execute(
+                """
+                INSERT INTO vacancy_analysis (vacancy_id, analyzed_at, embedding)
+                SELECT id, '2026-10-19', %s::vector FROM vacancies
+                """,
+                (self.storage._serialize_vector(vector),),
+            )
+        self.conn.commit()
+
+        resume = {"work_format": "REMOTE,HYBRID"}
+        matches = self.storage.find_top_vacancies(vector, resume, top_n=3)
+        self.assertEqual(
+            [v["url"] for v in matches], ["page-201", "page-202", "page-203"]
+        )
+        self.assertTrue(all("_match_distance" not in v for v in matches))
+        self.storage.update_vacancy_status("page-201", "archived")
+        matches = self.storage.find_top_vacancies(vector, resume, top_n=3)
+        self.assertEqual(
+            [v["url"] for v in matches], ["page-202", "page-203", "page-204"]
+        )
 
     def test_collection_metadata_saved_without_updating_duplicate(self) -> None:
         """Собранная новая запись активна; дубликат не меняет дату и статус."""

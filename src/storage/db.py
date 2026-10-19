@@ -13,9 +13,12 @@ from src.collectors.vacancy_status import (
     UNKNOWN_RETRY_INTERVAL,
     VALID_STATUSES,
 )
+from src.matching.filters import matches_salary, matches_work_location
 
 logger = logging.getLogger(__name__)
 load_dotenv()
+
+_MATCH_PAGE_SIZE = 100
 
 
 class VacancyStorage:
@@ -558,9 +561,11 @@ class VacancyStorage:
         resume: dict,
         top_n: int = 20,
     ) -> list[dict]:
-        """Векторный поиск top-N вакансий с жёсткими фильтрами по резюме.
+        """Векторный поиск top-N вакансий с фильтрами по резюме.
 
-        Фильтры применяются мягко: если данных для фильтра нет — он пропускается.
+        Формат, город и зарплата проверяются до ограничения числа результатов;
+        неизвестные данные сами по себе не исключают вакансию. Кандидаты
+        загружаются SQL-порциями по расстоянию и ID, без полного чтения выборки.
 
         Args:
             embedding: вектор резюме.
@@ -569,32 +574,66 @@ class VacancyStorage:
 
         Returns:
             Список словарей с полями вакансии + score.
+
+        Raises:
+            ValueError: если top_n отрицательное.
         """
+        if top_n < 0:
+            raise ValueError("top_n must be nonnegative")
+        if top_n == 0:
+            return []
+
         vec_str = self._serialize_vector(embedding)
         where, params = self._build_match_filters(resume)
         where.append("v.status IN ('active', 'unknown')")
 
-        where_sql = " AND ".join(where)
-
-        query = f"""
+        query = """
             SELECT
                 v.id, v.name, v.employer, v.employer_rating, v.employer_reviews_count,
-                v.city, v.salary, v.experience, v.work_format, v.url,
+                v.city, v.salary, v.salary_to, v.salary_currency,
+                v.experience, v.work_format, v.url,
                 v.status, v.last_checked_at,
                 a.stack, a.tasks, a.certifications, a.domains,
                 a.programming_languages, a.english_level,
-                ROUND((1 - (a.embedding <=> %s::vector))::numeric, 4) AS score
+                ROUND((1 - (a.embedding <=> %s::vector))::numeric, 4) AS score,
+                a.embedding <=> %s::vector AS _match_distance
             FROM vacancy_analysis a
             JOIN vacancies v ON v.id = a.vacancy_id
             WHERE {where_sql}
-            ORDER BY a.embedding <=> %s::vector
+            ORDER BY a.embedding <=> %s::vector, v.id
             LIMIT %s
         """
-        full_params = [vec_str, *params, vec_str, top_n]
 
+        matches: list[dict] = []
+        after: tuple[float, int] | None = None
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(query, full_params)
-            return cur.fetchall()
+            while True:
+                page_where = list(where)
+                page_params = [vec_str, vec_str, *params]
+                if after is not None:
+                    page_where.append("((a.embedding <=> %s::vector), v.id) > (%s, %s)")
+                    page_params.extend([vec_str, *after])
+                page_params.extend([vec_str, _MATCH_PAGE_SIZE])
+                cur.execute(
+                    query.format(where_sql=" AND ".join(page_where)), page_params
+                )
+                batch = cur.fetchall()
+                if not batch:
+                    break
+                # Продолжаем после всей порции, включая отсеянные вакансии.
+                # Для позиции нужен исходный float, а не округлённый score.
+                after = (batch[-1]["_match_distance"], batch[-1]["id"])
+                for vacancy in batch:
+                    if matches_work_location(resume, vacancy) and matches_salary(
+                        resume, vacancy
+                    ):
+                        vacancy.pop("_match_distance")
+                        matches.append(vacancy)
+                        if len(matches) == top_n:
+                            return matches
+                if len(batch) < _MATCH_PAGE_SIZE:
+                    break
+        return matches
 
     @staticmethod
     def _serialize_vector(embedding: list[float]) -> str:
@@ -624,21 +663,8 @@ class VacancyStorage:
         years = resume.get("experience_years")
         allowed = self._allowed_experience(years)
         if allowed:
-            where.append("v.experience = ANY(%s)")
+            where.append("(v.experience = ANY(%s) OR v.experience IS NULL)")
             params.append(allowed)
-
-        # 2. Зарплата: отсеиваем только явные провалы
-        salary_min = resume.get("salary_min")
-        if salary_min:
-            where.append("(v.salary_to IS NULL OR v.salary_to >= %s)")
-            params.append(salary_min)
-
-        # 3. Город: если не готов к переезду — требуем совпадения или REMOTE
-        if not resume.get("ready_to_relocate"):
-            city = resume.get("city")
-            if city and city != "unknown":
-                where.append("(v.city = %s OR v.work_format ILIKE '%%REMOTE%%')")
-                params.append(city)
 
         return where, params
 
