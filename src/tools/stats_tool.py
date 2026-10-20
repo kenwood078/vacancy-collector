@@ -1,6 +1,7 @@
 import json
 import logging
-from datetime import datetime
+from calendar import monthrange
+from datetime import datetime, timedelta, timezone
 
 from crewai.tools import BaseTool
 from pydantic import Field, PrivateAttr
@@ -14,6 +15,27 @@ from src.analytics.stats import (
 from src.storage import VacancyStorage
 
 logger = logging.getLogger(__name__)
+
+REPORT_PERIODS = {
+    "30d": "Последний месяц (30 дней)",
+    "3m": "Последние 3 месяца",
+    "6m": "Последние 6 месяцев",
+    "1y": "Последний год",
+}
+
+
+def _period_start(period: str, now: datetime) -> datetime:
+    """Вычисляет начало периода, учитывая длину календарных месяцев."""
+    if period not in REPORT_PERIODS:
+        raise ValueError(f"Неизвестный период отчёта: {period}")
+    if period == "30d":
+        return now - timedelta(days=30)
+    months = {"3m": 3, "6m": 6, "1y": 12}[period]
+    year, month = divmod(now.year * 12 + now.month - 1 - months, 12)
+    month += 1
+    return now.replace(
+        year=year, month=month, day=min(now.day, monthrange(year, month)[1])
+    )
 
 
 def _select_examples(vacancies: list[dict]) -> list[dict]:
@@ -56,6 +78,8 @@ class GetStatsTool(BaseTool):
         "(count и percent). professional_role — код роли HH, не количество. "
         "Количество вакансий — stats.total. Группы пересекаются; их частоты "
         "нельзя суммировать для получения общего числа вакансий. "
+        "Выборка ограничена периодом по collected_at; period содержит label, "
+        "start и end (UTC). Укажи выбранный период в начале отчёта. "
         "Плюс до 3 примеров вакансий "
         "(low/mid/high по зарплате) с полями name, employer, city, salary, "
         "top_skills, url."
@@ -65,6 +89,7 @@ class GetStatsTool(BaseTool):
     professional_role: int | None = Field(default=None, exclude=True)
     skills_keywords: list[str] | None = Field(default=None, exclude=True)
     skill_groups: dict[str, list[str]] = Field(default_factory=dict, exclude=True)
+    period: str = Field(default="1y", exclude=True)
     _payload: str | None = PrivateAttr(default=None)
 
     def prepare(self) -> bool:
@@ -81,8 +106,10 @@ class GetStatsTool(BaseTool):
             raise ValueError("Для профильного отчёта требуется professional_role")
         if self.skills_keywords is None:
             raise ValueError("Для профильного отчёта требуется skills_keywords")
+        now = datetime.now(timezone.utc)
+        start = _period_start(self.period, now)
         with VacancyStorage() as storage:
-            vacancies = storage.get_by_professional_role(self.professional_role)
+            vacancies = storage.get_for_report(self.professional_role, start, now)
         if not vacancies:
             logger.warning("No vacancies in DB")
 
@@ -91,7 +118,12 @@ class GetStatsTool(BaseTool):
         data = {
             "stats": stats,
             "examples": examples,
-            "report_date": datetime.now().astimezone().strftime("%d.%m.%Y"),
+            "report_date": now.astimezone().strftime("%d.%m.%Y"),
+            "period": {
+                "label": REPORT_PERIODS[self.period],
+                "start": start.isoformat(),
+                "end": now.isoformat(),
+            },
         }
         if self.specialization is not None:
             data.update(

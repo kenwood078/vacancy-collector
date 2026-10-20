@@ -190,6 +190,53 @@ class StatusStorageDatabaseTests(unittest.TestCase):
             )
         self.conn.commit()
 
+    def test_date_ranges_compare_instants_and_include_end_day(self) -> None:
+        """UTC, +03:00 и календарный день выбирают одинаковые записи на границах."""
+        self.storage._create_table()
+        with self.conn.cursor() as cur:
+            cur.execute("SET TIME ZONE 'Europe/Moscow'")
+            for url, collected_at in (
+                ("start", "2026-10-19T21:00:00+00:00"),
+                ("end", "2026-10-20T20:59:59.999999+00:00"),
+                ("outside", "2026-10-20T21:00:00+00:00"),
+            ):
+                cur.execute(
+                    "INSERT INTO vacancies (url, name, employer, collected_at) "
+                    "VALUES (%s, 'Test', 'Test', %s)",
+                    (url, collected_at),
+                )
+        for start, end in (
+            ("2026-10-19T21:00:00+00:00", "2026-10-20T20:59:59.999999+00:00"),
+            ("2026-10-20T00:00:00+03:00", "2026-10-20T23:59:59.999999+03:00"),
+            ("2026-10-20", "2026-10-20"),
+        ):
+            with self.subTest(start=start, end=end):
+                rows = self.storage.get_by_date(start, end)
+                self.assertEqual({row["url"] for row in rows}, {"start", "end"})
+
+    def test_report_filters_role_period_and_keeps_all_statuses(self) -> None:
+        """Другие роли, NULL и записи за границами периода не входят в отчёт."""
+        self.storage._create_table()
+        start = datetime(2026, 9, 20, tzinfo=timezone.utc)
+        end = start.replace(month=10)
+        with self.conn.cursor() as cur:
+            for url, role, status, collected_at in (
+                ("start", 112, "active", start),
+                ("end", 112, "archived", end),
+                ("middle", 112, "unknown", start.replace(day=25)),
+                ("old", 112, "active", start.replace(day=19)),
+                ("future", 112, "active", end.replace(day=21)),
+                ("other", 160, "active", start),
+                ("no_role", None, "active", start),
+            ):
+                cur.execute(
+                    "INSERT INTO vacancies (url, name, employer, professional_role, "
+                    "status, collected_at) VALUES (%s, 'Test', 'Test', %s, %s, %s)",
+                    (url, role, status, collected_at.isoformat()),
+                )
+        rows = self.storage.get_for_report(112, start, end)
+        self.assertEqual([row["url"] for row in rows], ["middle", "end", "start"])
+
     def test_schema_defaults_constraints_and_existing_data(self) -> None:
         """Новая схема задаёт defaults и сохраняет данные при повторном DDL."""
         self.storage._create_table()

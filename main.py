@@ -23,7 +23,7 @@ from src.specializations import (
     load_specialization,
 )
 from src.storage import VacancyStorage
-from src.tools.stats_tool import GetStatsTool
+from src.tools.stats_tool import REPORT_PERIODS, GetStatsTool
 
 load_dotenv()
 
@@ -306,11 +306,12 @@ def _load_report_configuration(
     return specialization, profile, crew_config, agent_configs
 
 
-def cmd_report(spec: str) -> None:
+def cmd_report(spec: str, *, period: str = "1y") -> None:
     """Готовит статистику специализации и запускает её writer-агента.
 
     Args:
         spec: обязательный ключ специализации.
+        period: 30d, 3m, 6m или 1y; по умолчанию последний год.
     """
     specialization, profile, crew_config, agent_configs = _load_report_configuration(
         spec
@@ -321,10 +322,12 @@ def cmd_report(spec: str) -> None:
         professional_role=specialization["professional_role"],
         skills_keywords=profile["skills_keywords"],
         skill_groups=profile["skill_groups"],
+        period=period,
     )
     if not stats_tool.prepare():
         print(
-            f"Нет вакансий для специализации {spec} ({specialization['display_name']})."
+            f"Нет вакансий для специализации {spec} ({specialization['display_name']}) "
+            "за выбранный период."
         )
         return
 
@@ -604,16 +607,19 @@ def cmd_check_status(n: int = 20) -> None:
     )
 
 
-def cmd_all_hh(n: int, spec: str) -> None:
+def cmd_all_hh(n: int, spec: str, *, period: str = "1y") -> None:
     """Собирает вакансии HH и строит отчёт той же специализации.
 
     Args:
         n: число новых вакансий для сбора.
         spec: обязательный ключ специализации.
+        period: период отчёта, по умолчанию последний год.
     """
+    if period not in REPORT_PERIODS:
+        raise ValueError(f"Неизвестный период отчёта: {period}")
     _load_report_configuration(spec)
     cmd_collect_hh(n, spec)
-    cmd_report(spec)
+    cmd_report(spec, period=period)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -635,6 +641,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_report = sub.add_parser("report", help="Отчёт по специализации из БД")
     _add_spec_argument(p_report)
+    _add_report_period_argument(p_report)
 
     p_analyze = sub.add_parser(
         "analyze",
@@ -668,6 +675,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_all_hh = sub.add_parser("all-hh", help="Сбор + отчет")
     p_all_hh.add_argument("--n", type=int, default=10)
     _add_spec_argument(p_all_hh)
+    _add_report_period_argument(p_all_hh)
 
     return parser
 
@@ -708,6 +716,16 @@ def _add_spec_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_report_period_argument(parser: argparse.ArgumentParser) -> None:
+    """Добавляет выбор периода отчёта по дате сбора вакансий."""
+    parser.add_argument(
+        "--period",
+        choices=REPORT_PERIODS,
+        default="1y",
+        help="Период отчёта: 30d, 3m, 6m, 1y (по умолчанию последний год)",
+    )
+
+
 def main() -> None:
     """Разбирает аргументы CLI и запускает выбранную команду."""
     setup_logging()
@@ -720,7 +738,7 @@ def main() -> None:
         elif args.command == "collect-hh":
             cmd_collect_hh(args.n, args.spec)
         elif args.command == "report":
-            cmd_report(args.spec)
+            cmd_report(args.spec, period=args.period)
         elif args.command == "analyze":
             cmd_analyze(args.n)
         elif args.command == "embed-vacancies":
@@ -732,7 +750,7 @@ def main() -> None:
         elif args.command == "check-status":
             cmd_check_status(args.n)
         elif args.command == "all-hh":
-            cmd_all_hh(args.n, args.spec)
+            cmd_all_hh(args.n, args.spec, period=args.period)
     except SpecializationConfigError as exc:
         parser.error(str(exc))
     except StatusCheckConfigError as exc:

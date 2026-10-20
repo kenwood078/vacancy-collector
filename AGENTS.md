@@ -72,7 +72,7 @@ python -c "from src.storage import VacancyStorage; VacancyStorage().close()"
   `save_analysis`, `save_embedding`, `save_resume`, `get_analyzed_ids`,
   `get_unanalyzed`, `get_unembedded`, `get_resume`, `find_top_vacancies`,
   `get_all`, `get_by_professional_role`, `get_by_name`, `get_by_url`,
-  `get_by_date`, `exists`, `count`,
+  `get_by_date`, `get_for_report`, `exists`, `count`,
   `update_vacancy_status`, `get_due_for_status_check`,
   `close`, `__enter__`, `__exit__`; реэкспорт из `src.storage`.
 - Функции `build_match_report`, `build_vacancy_text`, `build_resume_text`,
@@ -160,15 +160,20 @@ python -c "from src.storage import VacancyStorage; VacancyStorage().close()"
 - Специализация определяется существующим professional_role HH: network_engineer
   → 112, devops_sre → 160, security → 116. Не добавляй колонку или миграцию
   ради этих фильтров и не подменяй роль ответа HH выбранным пресетом.
-- Отчёт использует все сохранённые записи выбранной роли, включая старые.
-  search_period влияет только на сбор. Другие роли и NULL исключаются.
+- Отчёт использует выбранную роль и период по collected_at: по умолчанию 1y,
+  также --period 30d, 3m, 6m. 30d — 30 суток; остальные — календарные месяцы
+  или год назад с учётом длины месяца. Границы включены, время — UTC.
+  get_for_report фильтрует роль и период в SQL, включает все статусы,
+  сохраняет порядок id DESC. search_period влияет только на сбор.
+  Другие роли и NULL исключаются.
   Serper не получает код роли; его записи без роли не входят в отчёты.
 - DevOps/SRE ограничен ролью 160; SRE с другой ролью HH не входит в выборку.
 - Конфиги загружаются только для соответствующих команд относительно проекта.
   Ошибки полей и неизвестные ключи должны обнаруживаться до внешних вызовов.
   all-hh проверяет также профиль отчёта до начала сбора.
 - GetStatsTool создаётся на каждый отчёт и закрепляет выборку до writer.
-  Аргументы инструмента не позволяют LLM менять роль или профиль.
+  Аргументы инструмента не позволяют LLM менять роль, профиль или период.
+  В all-hh период фиксируется после сбора; writer получает period в JSON.
 - Считай профильные группы по requirements и key_skills, один раз на вакансию
   внутри группы. Группы пересекаются; процент — от числа выбранных вакансий.
   Словарь skills_keywords хранится только в JSONC выбранного профиля

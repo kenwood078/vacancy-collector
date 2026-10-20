@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from types import TracebackType
 from typing import Any
 
@@ -221,8 +221,7 @@ class VacancyStorage:
                         vacancy.get("professional_role"),
                         vacancy.get("published_at"),
                         vacancy.get("responses_count"),
-                        # Сохраняем локальное время и прежний формат даты.
-                        datetime.now().isoformat(),  # noqa: DTZ005
+                        datetime.now(timezone.utc).isoformat(),
                         status,
                         vacancy.get("last_checked_at"),
                     ),
@@ -277,8 +276,7 @@ class VacancyStorage:
                         analysis["english_level"],
                         analysis["llm_model"],
                         analysis["prompt_version"],
-                        # Сохраняем локальное время и прежний формат даты.
-                        datetime.now().isoformat(),  # noqa: DTZ005
+                        datetime.now(timezone.utc).isoformat(),
                     ),
                 )
                 self.conn.commit()
@@ -355,8 +353,7 @@ class VacancyStorage:
                         embedding_text,
                         vec_str,
                         model,
-                        # Сохраняем локальное время и прежний формат даты.
-                        datetime.now().isoformat(),  # noqa: DTZ005
+                        datetime.now(timezone.utc).isoformat(),
                         vacancy_id,
                     ),
                 )
@@ -415,8 +412,7 @@ class VacancyStorage:
             ID сохранённого резюме.
         """
         vec_str = self._serialize_vector(embedding)
-        # Сохраняем локальное время и прежний формат даты.
-        now = datetime.now().isoformat()  # noqa: DTZ005
+        now = datetime.now(timezone.utc).isoformat()
 
         try:
             with self.conn.cursor() as cur:
@@ -742,6 +738,27 @@ class VacancyStorage:
             )
             return cur.fetchall()
 
+    def get_for_report(
+        self, professional_role: int, start: datetime, end: datetime
+    ) -> list[dict]:
+        """Выбирает вакансии роли за период сбора, включая обе границы.
+
+        Args:
+            professional_role: код роли HH.
+            start: начало периода с часовым поясом.
+            end: конец периода с часовым поясом.
+
+        Returns:
+            Вакансии всех статусов в порядке id DESC.
+        """
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM vacancies WHERE professional_role = %s "
+                "AND collected_at::timestamptz BETWEEN %s AND %s ORDER BY id DESC",
+                (professional_role, start, end),
+            )
+            return cur.fetchall()
+
     def get_by_name(self, patterns: list[str], limit: int | None = None) -> list[dict]:
         """Возвращает вакансии, у которых в name встречается любой из patterns
         (регистронезависимо, ILIKE).
@@ -785,7 +802,7 @@ class VacancyStorage:
         """Возвращает вакансии за диапазон дат collected_at (ISO-8601).
 
         Если end_date передана как 'YYYY-MM-DD' (10 символов), расширяется
-        до конца дня.
+        до конца дня. Значения без часового пояса используют пояс сессии БД.
 
         Args:
             start_date: начало диапазона collected_at в ISO-8601.
@@ -798,7 +815,8 @@ class VacancyStorage:
             end_date += "T23:59:59.999999"
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT * FROM vacancies WHERE collected_at BETWEEN %s AND %s",
+                "SELECT * FROM vacancies "
+                "WHERE collected_at::timestamptz BETWEEN %s::timestamptz AND %s::timestamptz",
                 (start_date, end_date),
             )
             return cur.fetchall()
