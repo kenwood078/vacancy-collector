@@ -12,12 +12,11 @@
   "devops_sre": {
     "display_name": "DevOps и SRE",
     "query_hh": "(\"DevOps\" OR \"SRE\" OR \"Site Reliability Engineer\" OR \"Site Reliability Engineering\")",
-    // SRE с другой ролью HH не входит в эту выборку.
     "professional_role": 160,
     "area": [1, 2],
-    "experience": ["between1And3", "between3And6", "moreThan6"],
+    "experience": ["noExperience","between1And3", "between3And6", "moreThan6"],
     "work_format": ["REMOTE", "HYBRID"],
-    "excluded_text": "стажер junior помощник техподдержка support",
+    "excluded_text": "",
     "search_period": 30
   },
   "security": {
